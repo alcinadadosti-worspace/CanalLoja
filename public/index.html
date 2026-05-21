@@ -1911,12 +1911,15 @@ function renderFileStatus() {
 function detectStoresAndSellers() {
   storesCatalog = {};
 
-  // Perfil "digital" não usa storesCatalog — só renderiza a aba Digital
+  // Perfil "digital" não usa storesCatalog — só renderiza a aba Digital.
+  // Mostra também metasSection (para editar metas do canal) e chama
+  // renderDigitalTab() direto, pulando renderDashboard que exige selectedPdv.
   if (window.currentUser?.role === 'digital') {
     if (loadedWorkbooks.lojaDigital) {
+      $('metasSection').style.display = 'block';
       $('dashboardSection').style.display = 'block';
       checkDataFreshness();
-      try { renderDashboard(); } catch(e) {}
+      try { renderDigitalTab(); } catch(e) { console.error('renderDigitalTab:', e); }
     }
     return;
   }
@@ -3955,7 +3958,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const scheduleDashRefresh = () => {
     clearTimeout(dashRefreshTimer);
     dashRefreshTimer = setTimeout(() => {
-      try { if ($('dashboardSection').style.display !== 'none') renderDashboard(); } catch(e){}
+      try {
+        if ($('dashboardSection').style.display === 'none') return;
+        // Perfil "digital" não passa por renderDashboard (que exige selectedPdv)
+        if (window.currentUser?.role === 'digital') {
+          renderDigitalTab();
+        } else {
+          renderDashboard();
+        }
+      } catch(e){}
     }, 400);
   };
 
