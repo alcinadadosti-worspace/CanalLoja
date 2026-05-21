@@ -1,0 +1,24 @@
+# Planilhas (dados reais — não versionar)
+*.xlsx
+*.xls
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude / agentes
+.claude/
+
+# Scripts temporários de inspeção
+_*.py
+
+# Logs / saídas
+*.log
