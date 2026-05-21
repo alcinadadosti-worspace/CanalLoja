@@ -1278,6 +1278,8 @@
 </style>
 </head>
 <body>
+<!--USER_INJECT-->
+<script src="/auth.js"></script>
 
 <header>
   <div>
@@ -1285,10 +1287,12 @@
     <div class="tagline" style="margin-top:6px">Gerador de relatório · Loja</div>
   </div>
   <div style="display:flex; align-items:center; gap:14px;">
+    <div class="tagline" id="userPill" style="padding:4px 10px; border:1px solid var(--line); border-radius:4px;"></div>
     <div class="tagline" id="dateStamp"></div>
     <button class="theme-toggle" id="themeToggle" title="Alternar tema">
       <span id="themeIcon">☀️</span> <span id="themeLabel">CLARO</span>
     </button>
+    <button class="theme-toggle" id="logoutBtn" title="Sair">Sair</button>
   </div>
 </header>
 
@@ -1536,7 +1540,8 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const STORAGE_KEY = 'resultado_diario_v3';
+// Namespaced por usuário — cada gestora mantém suas próprias metas/apelidos
+const STORAGE_KEY = 'resultado_diario_v3_' + (window.currentUser?.username || 'guest');
 
 const FILE_PATTERNS = {
   resumo:             /Resumo_de_Performance_Indicadores_Loja/i,
@@ -1888,9 +1893,12 @@ function renderPeriods() {
   periodStatus.innerHTML = html;
 }
 function renderFileStatus() {
-  const loaded = REQUIRED.filter(k => loadedWorkbooks[k]);
-  const missing = REQUIRED.filter(k => !loadedWorkbooks[k]);
-  let html = `<strong>${loaded.length}/${REQUIRED.length}</strong> planilhas essenciais carregadas`;
+  // Perfil "digital" só precisa do arquivo LojaDigital
+  const isDigital = window.currentUser?.role === 'digital';
+  const required = isDigital ? ['lojaDigital'] : REQUIRED;
+  const loaded = required.filter(k => loadedWorkbooks[k]);
+  const missing = required.filter(k => !loadedWorkbooks[k]);
+  let html = `<strong>${loaded.length}/${required.length}</strong> planilhas essenciais carregadas`;
   if (missing.length === 0) html += ` <span class="status-pill status-ok">Pronto</span>`;
   else {
     html += ` <span class="status-pill status-warn">Faltando ${missing.length}</span>`;
@@ -1902,6 +1910,17 @@ function renderFileStatus() {
 // ---------- detection ----------
 function detectStoresAndSellers() {
   storesCatalog = {};
+
+  // Perfil "digital" não usa storesCatalog — só renderiza a aba Digital
+  if (window.currentUser?.role === 'digital') {
+    if (loadedWorkbooks.lojaDigital) {
+      $('dashboardSection').style.display = 'block';
+      checkDataFreshness();
+      try { renderDashboard(); } catch(e) {}
+    }
+    return;
+  }
+
   // From Resumo CONSULTOR sheet (most reliable: only active consultores with data this period)
   const rows = getSheet('resumo', 'Consultor');
   if (!rows) return;
@@ -1924,13 +1943,23 @@ function detectStoresAndSellers() {
       storesCatalog[pdv].sellers.set(nname, prettyName(name));
     }
   }
+
+  // Filtro por papel: hub gestoras só veem suas lojas
+  if (typeof window.isPdvAllowed === 'function') {
+    for (const pdv of Object.keys(storesCatalog)) {
+      if (!window.isPdvAllowed(pdv)) delete storesCatalog[pdv];
+    }
+  }
+
   renderStoreSelect();
   if (Object.keys(storesCatalog).length > 0) {
-    $('storeSection').style.display = 'block';
-    $('metasSection').style.display = 'block';
-    $('generateSection').style.display = 'block';
-    $('dashboardSection').style.display = 'block';
-    $('outputSection').style.display = 'block';
+    // Mostra só as seções permitidas para o papel
+    const canSee = window.canSeeSection || (() => true);
+    if (canSee('store'))     $('storeSection').style.display = 'block';
+    if (canSee('metas'))     $('metasSection').style.display = 'block';
+    if (canSee('generate'))  $('generateSection').style.display = 'block';
+    if (canSee('dashboard')) $('dashboardSection').style.display = 'block';
+    if (canSee('output'))    $('outputSection').style.display = 'block';
   }
   checkDataFreshness();
 }
@@ -2061,8 +2090,9 @@ function updateAutoMetas() {
     } else {
       // No data in spreadsheet — make it manual, restore saved value if any
       recEl.value = storedManual.receitaLoja || '';
-      recEl.readOnly = false;
-      recEl.style.background = '';
+      // Respeita o lock do papel — só desliga readonly se o papel pode editar
+      recEl.readOnly = recEl.dataset.roleLocked === '1';
+      recEl.style.background = recEl.readOnly ? 'rgba(168,163,154,0.06)' : '';
       recEl.placeholder = 'digite manual (loja sem meta no PEF)';
       recInd.textContent = '⚠ sem dado na planilha — digite manualmente';
       recInd.style.color = 'var(--yellow)';
@@ -2079,8 +2109,8 @@ function updateAutoMetas() {
       bolInd.style.color = 'var(--green)';
     } else {
       bolEl.value = storedManual.boletoMedio || '';
-      bolEl.readOnly = false;
-      bolEl.style.background = '';
+      bolEl.readOnly = bolEl.dataset.roleLocked === '1';
+      bolEl.style.background = bolEl.readOnly ? 'rgba(168,163,154,0.06)' : '';
       bolEl.placeholder = 'digite manual';
       bolInd.textContent = '⚠ sem dado — manual';
       bolInd.style.color = 'var(--yellow)';
@@ -3128,6 +3158,9 @@ function renderDashboard() {
 function extractAllStores() {
   const result = {};
   for (const pdv of Object.keys(storesCatalog)) {
+    // storesCatalog já vem filtrado por papel em detectStoresAndSellers,
+    // mas reforço aqui no caso de chamadas em outros caminhos
+    if (typeof window.isPdvAllowed === 'function' && !window.isPdvAllowed(pdv)) continue;
     const sellers = Array.from(storesCatalog[pdv].sellers.keys());
     try {
       result[pdv] = extractAll(pdv, sellers);
@@ -3792,6 +3825,64 @@ function bindButtonRipple() {
 }
 
 // ---------- boot ----------
+// ---------- role filtering ----------
+// Esconde abas/seções e marca campos como readonly conforme o papel da usuária.
+// Chamado uma vez na inicialização (DOMContentLoaded).
+function applyRoleFiltering() {
+  const u = window.currentUser;
+  if (!u || !u.perms) return;
+  const perms = u.perms;
+
+  // 1. Abas do dashboard — esconde botões não permitidos
+  const allowedTabs = new Set(perms.tabs || []);
+  document.querySelectorAll('.dash-tab').forEach(btn => {
+    if (!allowedTabs.has(btn.dataset.tab)) btn.style.display = 'none';
+  });
+  document.querySelectorAll('.dash-tab-content').forEach(div => {
+    if (!allowedTabs.has(div.dataset.tabContent)) {
+      div.classList.remove('active');
+    }
+  });
+  // Garante que a aba ativa seja uma permitida
+  const activeBtn = document.querySelector('.dash-tab.active');
+  if (!activeBtn || activeBtn.style.display === 'none') {
+    const firstVisible = Array.from(document.querySelectorAll('.dash-tab'))
+      .find(b => b.style.display !== 'none');
+    if (firstVisible) {
+      document.querySelectorAll('.dash-tab').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.dash-tab-content').forEach(c => c.classList.remove('active'));
+      firstVisible.classList.add('active');
+      const tab = firstVisible.dataset.tab;
+      const content = document.querySelector(`.dash-tab-content[data-tab-content="${tab}"]`);
+      if (content) content.classList.add('active');
+    }
+  }
+
+  // 2. Inputs de metas — readonly se papel não pode editar
+  const ALL_META_FIELDS = [
+    'metaPRM', 'metaTurbinado', 'metaID', 'metaResgate', 'metaBBX',
+    'metaSkinLoja', 'metaNPS', 'metaItensBoleto', 'metaAuditoria',
+    'metaReceitaLoja', 'metaBoleto', 'npsLoja', 'auditoriaLoja',
+    'metaDigitalReceita', 'metaDigitalConversao', 'metaDigitalBM',
+  ];
+  for (const id of ALL_META_FIELDS) {
+    const el = $(id);
+    if (!el) continue;
+    if (!window.canEditField(id)) {
+      el.readOnly = true;
+      el.dataset.roleLocked = '1';
+      el.style.background = 'rgba(168,163,154,0.06)';
+      el.title = 'Somente leitura — sem permissão para editar este campo';
+    }
+  }
+
+  // 3. Botão "Resetar metas globais" — só Master que edita as globais usa
+  const resetBtn = $('resetGlobalMetas');
+  if (resetBtn && !(perms.editable?.global || []).length) {
+    resetBtn.style.display = 'none';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const today = new Date();
   const yyyy = today.getFullYear();
@@ -3800,8 +3891,17 @@ document.addEventListener('DOMContentLoaded', () => {
   $('reportDate').value = `${yyyy}-${mm}-${dd}`;
   $('dateStamp').textContent = `${dd}.${mm}.${yyyy}`;
 
+  // User pill no header + logout
+  const userPill = $('userPill');
+  if (userPill && window.currentUser) {
+    userPill.textContent = `${window.currentUser.name} · ${window.currentUser.perms?.label || window.currentUser.role}`;
+  }
+  const logoutBtn = $('logoutBtn');
+  if (logoutBtn) logoutBtn.addEventListener('click', () => window.logout && window.logout());
+
   applyLoadedState(loadState());
   applySeeds();  // pre-populate any missing metas with seed values
+  applyRoleFiltering();  // esconde/restringe UI conforme o papel da usuária
   bindDashTabs();
   bindCardGlow();
   bindButtonRipple();

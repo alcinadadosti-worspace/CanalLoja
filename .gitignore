@@ -17,6 +17,12 @@ desktop.ini
 # Claude / agentes
 .claude/
 
+# Node
+node_modules/
+npm-debug.log*
+.env
+.env.local
+
 # Scripts temporários de inspeção
 _*.py
 

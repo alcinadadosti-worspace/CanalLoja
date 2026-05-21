@@ -1,13 +1,27 @@
 services:
   - type: web
     name: canalloja
-    runtime: static
-    buildCommand: ""
-    staticPublishPath: .
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: public, max-age=0, must-revalidate
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      # Senhas: opcional sobrescrever. Sem essas vars, usa senhas-padrão
+      # (primeiro nome em minúsculo). Gere com `npm run hash -- <senha>`.
+      - key: USER_LEIDIANE_HASH
+        sync: false
+      - key: USER_TACIANE_HASH
+        sync: false
+      - key: USER_KEMILLY_HASH
+        sync: false
+      - key: USER_MARIANE_HASH
+        sync: false
+      # Slack — preencher quando integrar o bot
+      - key: SLACK_WEBHOOK_URL
+        sync: false
