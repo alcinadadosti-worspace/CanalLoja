@@ -42,4 +42,23 @@
     await fetch('/api/logout', { method: 'POST' });
     window.location.href = '/login.html';
   };
+
+  // ---- Admin (senha mestra desbloqueia upload de planilhas) ----
+  window.isAdminUnlocked = u.isAdmin === true;
+
+  window.unlockAdmin = async function(password) {
+    const r = await fetch('/api/admin/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (!r.ok) return false;
+    window.isAdminUnlocked = true;
+    return true;
+  };
+
+  window.lockAdmin = async function() {
+    await fetch('/api/admin/lock', { method: 'POST' });
+    window.isAdminUnlocked = false;
+  };
 })();

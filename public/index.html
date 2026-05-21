@@ -1292,23 +1292,50 @@
     <button class="theme-toggle" id="themeToggle" title="Alternar tema">
       <span id="themeIcon">☀️</span> <span id="themeLabel">CLARO</span>
     </button>
+    <button class="theme-toggle" id="adminBtn" title="Área Admin">
+      <span id="adminIcon">🔒</span> <span id="adminLabel">ADMIN</span>
+    </button>
     <button class="theme-toggle" id="logoutBtn" title="Sair">Sair</button>
   </div>
 </header>
+
+<!-- Modal de senha do Admin -->
+<div id="adminModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:var(--bg-2); border:1px solid var(--line); border-radius:8px; padding:28px 32px; width:100%; max-width:380px; box-shadow:0 12px 32px rgba(0,0,0,0.45);">
+    <div style="font-family:'Fraunces',Georgia,serif; font-size:22px; font-weight:600; margin-bottom:6px;">Área <span style="color:var(--accent)">Admin</span></div>
+    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-mute); letter-spacing:0.08em; text-transform:uppercase; margin-bottom:18px;">Senha mestra desbloqueia upload</div>
+    <input type="password" id="adminPasswordInput" placeholder="senha mestra" style="width:100%; background:var(--bg-3); color:var(--ink); border:1px solid var(--line); border-radius:4px; padding:10px 12px; font-size:14px; font-family:inherit; margin-bottom:12px;">
+    <div style="display:flex; gap:8px;">
+      <button id="adminSubmit" style="flex:1; background:var(--accent); color:#1a1815; border:none; border-radius:4px; padding:10px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer;">Desbloquear</button>
+      <button id="adminCancel" style="background:var(--bg-3); color:var(--ink-mute); border:1px solid var(--line); border-radius:4px; padding:10px 16px; font-family:inherit; font-size:13px; cursor:pointer;">Cancelar</button>
+    </div>
+    <div id="adminError" style="margin-top:10px; color:var(--red); font-size:12px; display:none;"></div>
+  </div>
+</div>
 
 <main>
 
   <!-- 01 UPLOAD -->
   <section>
     <div class="section-label">01 / Planilhas</div>
-    <div class="section-title">Carregar arquivos do dia</div>
-    <div class="section-desc">Arraste todas as planilhas. Vou usar 5: Resumo, Penetração Fidelidade, Serviços Realizados, Cuidados Faciais e Canal Digital.</div>
-    <div class="dropzone" id="dropzone">
-      <div class="dropzone-icon">↓</div>
-      <div class="dropzone-text">Solte os arquivos .xlsx aqui</div>
-      <div class="dropzone-hint">ou clique para selecionar</div>
+    <div class="section-title">Planilhas do dia</div>
+    <div class="section-desc" id="uploadDesc">Carregando última atualização…</div>
+
+    <!-- Visível só pra admin desbloqueado -->
+    <div id="adminUploadArea" style="display:none">
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-icon">↓</div>
+        <div class="dropzone-text">Solte os .xlsx aqui</div>
+        <div class="dropzone-hint">ou clique para selecionar — vou salvar no servidor pra todas verem</div>
+      </div>
+      <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
     </div>
-    <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+
+    <!-- Visível pra não-admin -->
+    <div id="lockedUploadHint" style="display:none; padding:18px 20px; background:var(--bg-3); border:1px dashed var(--line); border-radius:var(--radius); font-size:13px; color:var(--ink-mute);">
+      🔒 Upload é restrito à <strong style="color:var(--ink)">Área Admin</strong>. As planilhas que você vê abaixo foram carregadas pelo admin.
+    </div>
+
     <div class="file-status" id="fileStatus"></div>
     <details>
       <summary>Log de processamento</summary>
@@ -1804,6 +1831,20 @@ async function handleFiles(fileList) {
         const buf = await file.arrayBuffer();
         loadedWorkbooks[key] = XLSX.read(buf, { type: 'array' });
         logDebug(`✓ ${LABELS[key]} — ${file.name}`, 'ok');
+
+        // Admin desbloqueado: replica no servidor pras outras gestoras
+        if (window.isAdminUnlocked) {
+          try {
+            const r = await fetch(
+              `/api/admin/upload?key=${key}&filename=${encodeURIComponent(file.name)}`,
+              { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf }
+            );
+            if (r.ok) logDebug(`↑ Salvo no servidor: ${file.name}`, 'ok');
+            else logDebug(`✗ Falha ao salvar no servidor (${r.status})`, 'err');
+          } catch (e) {
+            logDebug(`✗ Servidor: ${e.message}`, 'err');
+          }
+        }
       } catch (e) {
         logDebug(`✗ Erro ao ler ${file.name}: ${e.message}`, 'err');
       }
@@ -1814,6 +1855,83 @@ async function handleFiles(fileList) {
   renderFileStatus();
   renderPeriods();
   detectStoresAndSellers();
+  if (window.isAdminUnlocked) refreshFilesMeta();  // atualiza banner "Última atualização"
+}
+
+// Carrega arquivos que o admin já subiu pro servidor — todos os usuários
+// fazem isso ao entrar (admin inclusive, pra não precisar re-upar se voltar)
+async function loadFilesFromServer() {
+  try {
+    const r = await fetch('/api/files');
+    if (!r.ok) return;
+    const meta = await r.json();
+    let any = false;
+    for (const [key, info] of Object.entries(meta)) {
+      if (!info) continue;
+      try {
+        const fr = await fetch(`/api/files/${key}`);
+        if (!fr.ok) continue;
+        const buf = await fr.arrayBuffer();
+        loadedWorkbooks[key] = XLSX.read(buf, { type: 'array' });
+        logDebug(`↓ Carregado do servidor: ${info.filename}`, 'ok');
+        any = true;
+      } catch (e) {
+        logDebug(`✗ Erro baixando ${key}: ${e.message}`, 'err');
+      }
+    }
+    updateUploadDesc(meta);
+    if (any) {
+      renderFileStatus();
+      renderPeriods();
+      detectStoresAndSellers();
+    }
+  } catch (e) {
+    console.warn('loadFilesFromServer:', e);
+  }
+}
+
+// Atualiza só o banner "Última atualização" sem re-baixar tudo
+async function refreshFilesMeta() {
+  try {
+    const r = await fetch('/api/files');
+    if (!r.ok) return;
+    updateUploadDesc(await r.json());
+  } catch(e) {}
+}
+
+function updateUploadDesc(meta) {
+  const el = $('uploadDesc');
+  if (!el) return;
+  const items = Object.values(meta).filter(Boolean);
+  if (items.length === 0) {
+    el.innerHTML = window.isAdminUnlocked
+      ? 'Arraste todas as 5 planilhas do dia. Vou salvar no servidor pra todas gestoras consumirem.'
+      : '<span style="color:var(--yellow)">Nenhuma planilha disponível ainda.</span> Aguarde o admin fazer upload.';
+    return;
+  }
+  // Pega a mais recente
+  const latest = items.reduce((a, b) => new Date(a.mtime) > new Date(b.mtime) ? a : b);
+  const d = new Date(latest.mtime);
+  const fmt = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  el.innerHTML = `<span style="color:var(--green)">● ${items.length}/5 planilhas no servidor</span> · última atualização <strong>${fmt}</strong> por ${latest.uploader}`;
+}
+
+function updateUploadAreaUI() {
+  const adminArea = $('adminUploadArea');
+  const lockedHint = $('lockedUploadHint');
+  const adminIcon = $('adminIcon');
+  const adminLabel = $('adminLabel');
+  if (window.isAdminUnlocked) {
+    if (adminArea) adminArea.style.display = '';
+    if (lockedHint) lockedHint.style.display = 'none';
+    if (adminIcon) adminIcon.textContent = '🔓';
+    if (adminLabel) adminLabel.textContent = 'TRAVAR';
+  } else {
+    if (adminArea) adminArea.style.display = 'none';
+    if (lockedHint) lockedHint.style.display = '';
+    if (adminIcon) adminIcon.textContent = '🔒';
+    if (adminLabel) adminLabel.textContent = 'ADMIN';
+  }
 }
 
 function extractPeriod(wbKey) {
@@ -3905,9 +4023,62 @@ document.addEventListener('DOMContentLoaded', () => {
   applyLoadedState(loadState());
   applySeeds();  // pre-populate any missing metas with seed values
   applyRoleFiltering();  // esconde/restringe UI conforme o papel da usuária
+  updateUploadAreaUI();  // mostra dropzone só se admin, senão mostra hint
+  loadFilesFromServer();  // baixa planilhas que o admin já subiu
   bindDashTabs();
   bindCardGlow();
   bindButtonRipple();
+
+  // Botão "Área Admin" — abre modal ou trava se já desbloqueado
+  const adminBtn = $('adminBtn');
+  const adminModal = $('adminModal');
+  const adminPasswordInput = $('adminPasswordInput');
+  const adminSubmit = $('adminSubmit');
+  const adminCancel = $('adminCancel');
+  const adminError = $('adminError');
+  const openAdminModal = () => {
+    adminError.style.display = 'none';
+    adminPasswordInput.value = '';
+    adminModal.style.display = 'flex';
+    setTimeout(() => adminPasswordInput.focus(), 50);
+  };
+  const closeAdminModal = () => { adminModal.style.display = 'none'; };
+  if (adminBtn) adminBtn.addEventListener('click', async () => {
+    if (window.isAdminUnlocked) {
+      // travar
+      await window.lockAdmin();
+      updateUploadAreaUI();
+      toast('Modo admin travado.');
+    } else {
+      openAdminModal();
+    }
+  });
+  if (adminCancel) adminCancel.addEventListener('click', closeAdminModal);
+  if (adminSubmit) adminSubmit.addEventListener('click', async () => {
+    const pw = adminPasswordInput.value;
+    if (!pw) return;
+    adminSubmit.disabled = true;
+    adminSubmit.textContent = 'Verificando…';
+    const ok = await window.unlockAdmin(pw);
+    adminSubmit.disabled = false;
+    adminSubmit.textContent = 'Desbloquear';
+    if (ok) {
+      closeAdminModal();
+      updateUploadAreaUI();
+      refreshFilesMeta();
+      toast('Modo admin desbloqueado.');
+    } else {
+      adminError.textContent = 'Senha incorreta.';
+      adminError.style.display = 'block';
+    }
+  });
+  if (adminPasswordInput) adminPasswordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') adminSubmit.click();
+    if (e.key === 'Escape') closeAdminModal();
+  });
+  if (adminModal) adminModal.addEventListener('click', (e) => {
+    if (e.target === adminModal) closeAdminModal();
+  });
 
   const dz = $('dropzone'), fi = $('fileInput');
   dz.addEventListener('click', () => fi.click());

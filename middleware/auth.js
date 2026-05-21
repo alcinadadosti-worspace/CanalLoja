@@ -3,7 +3,9 @@ const { USERS } = require('../config/users');
 
 const SECRET = process.env.JWT_SECRET || 'dev-secret-change-me-in-render';
 const COOKIE_NAME = 'canalloja_session';
+const ADMIN_COOKIE = 'canalloja_admin';
 const TOKEN_TTL = '12h';
+const ADMIN_TTL = '4h';
 
 function sign(username) {
   return jwt.sign({ u: username }, SECRET, { expiresIn: TOKEN_TTL });
@@ -50,4 +52,42 @@ function clearCookie(res) {
   res.clearCookie(COOKIE_NAME);
 }
 
-module.exports = { requireApi, requirePage, setCookie, clearCookie, COOKIE_NAME };
+// ---- Admin cookie (senha mestra que libera upload de planilhas) ----
+function signAdmin() {
+  return jwt.sign({ admin: true }, SECRET, { expiresIn: ADMIN_TTL });
+}
+
+function setAdminCookie(res) {
+  res.cookie(ADMIN_COOKIE, signAdmin(), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 4 * 60 * 60 * 1000,
+  });
+}
+
+function clearAdminCookie(res) {
+  res.clearCookie(ADMIN_COOKIE);
+}
+
+function isAdmin(req) {
+  const t = req.cookies?.[ADMIN_COOKIE];
+  if (!t) return false;
+  try {
+    jwt.verify(t, SECRET);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requireAdmin(req, res, next) {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'not_admin' });
+  next();
+}
+
+module.exports = {
+  requireApi, requirePage, setCookie, clearCookie, COOKIE_NAME,
+  setAdminCookie, clearAdminCookie, isAdmin, requireAdmin, ADMIN_COOKIE,
+};
+

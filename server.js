@@ -5,11 +5,20 @@ const path = require('path');
 const fs = require('fs');
 
 const { USERS, publicProfile } = require('./config/users');
-const { requireApi, requirePage, setCookie, clearCookie } = require('./middleware/auth');
+const { ADMIN_PASSWORD_HASH } = require('./config/admin');
+const {
+  requireApi, requirePage, setCookie, clearCookie,
+  setAdminCookie, clearAdminCookie, isAdmin, requireAdmin,
+} = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// Storage em memória das 5 planilhas. Some quando o servidor dorme (Free tier)
+// — admin re-faz upload de manhã. Cabe ~70 KB total, irrelevante pra RAM.
+const FILE_KEYS = ['resumo', 'bbx', 'servicosRealizados', 'cuidadosFaciais', 'lojaDigital'];
+const fileStore = {};
 
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
@@ -31,7 +40,66 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', requireApi, (req, res) => {
-  res.json(publicProfile(req.username));
+  res.json({ ...publicProfile(req.username), isAdmin: isAdmin(req) });
+});
+
+// ---------- Admin: senha mestra desbloqueia upload de planilhas ----------
+app.post('/api/admin/verify', requireApi, async (req, res) => {
+  const { password } = req.body || {};
+  const ok = await bcrypt.compare(password || '', ADMIN_PASSWORD_HASH);
+  if (!ok) return res.status(401).json({ error: 'invalid_admin_password' });
+  setAdminCookie(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/lock', requireApi, (req, res) => {
+  clearAdminCookie(res);
+  res.json({ ok: true });
+});
+
+// Recebe bytes brutos (multipart é overkill pra 1 arquivo por request)
+const RAW_XLSX = express.raw({
+  type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
+  limit: '10mb',
+});
+app.post('/api/admin/upload', requireApi, requireAdmin, RAW_XLSX, (req, res) => {
+  const key = req.query.key;
+  const filename = String(req.query.filename || '').slice(0, 200) || `upload-${Date.now()}.xlsx`;
+  if (!FILE_KEYS.includes(key)) return res.status(400).json({ error: 'invalid_key' });
+  if (!req.body || !req.body.length) return res.status(400).json({ error: 'no_data' });
+  fileStore[key] = {
+    filename, bytes: req.body,
+    mtime: new Date().toISOString(),
+    uploader: req.username,
+    size: req.body.length,
+  };
+  res.json({ ok: true, key, size: req.body.length, mtime: fileStore[key].mtime });
+});
+
+// Metadados — qualquer usuária logada pode ver o que tem disponível
+app.get('/api/files', requireApi, (req, res) => {
+  const out = {};
+  for (const k of FILE_KEYS) {
+    if (fileStore[k]) {
+      const { filename, mtime, uploader, size } = fileStore[k];
+      out[k] = { filename, mtime, uploader, size };
+    } else {
+      out[k] = null;
+    }
+  }
+  res.json(out);
+});
+
+// Bytes da planilha — qualquer usuária logada baixa
+app.get('/api/files/:key', requireApi, (req, res) => {
+  const k = req.params.key;
+  if (!FILE_KEYS.includes(k)) return res.status(400).json({ error: 'invalid_key' });
+  const f = fileStore[k];
+  if (!f) return res.status(404).json({ error: 'not_uploaded' });
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(f.filename)}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(f.bytes);
 });
 
 // Placeholder — quando implementar o bot Slack, usar o webhook do .env
