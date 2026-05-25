@@ -21,7 +21,7 @@ const USERS = {
   leidiane: { username: 'leidiane', name: 'Leidiane Souza',    role: 'master',    passwordHash: hashFor('leidiane') },
   taciane:  { username: 'taciane',  name: 'Maria Taciane',     role: 'hub_sul',   passwordHash: hashFor('taciane')  },
   kemilly:  { username: 'kemilly',  name: 'Kemilly Rafaelly',  role: 'hub_norte', passwordHash: hashFor('kemilly')  },
-  mariane:  { username: 'mariane',  name: 'Mariane Santos',    role: 'digital',   passwordHash: hashFor('mariane')  },
+  mariane:  { username: 'mariane',  name: 'Mariane Santos Sousa', role: 'digital',   passwordHash: hashFor('mariane')  },
 };
 
 // Mesma estrutura é usada no servidor (filtrar APIs) e enviada ao cliente
