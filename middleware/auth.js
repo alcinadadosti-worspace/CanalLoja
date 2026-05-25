@@ -86,8 +86,22 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireAdminOnly(req, res, next) {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'not_admin' });
+  req.username = req.username || 'admin';
+  next();
+}
+
+function requireAnyAuth(req, res, next) {
+  const u = verifyCookie(req);
+  if (u) { req.username = u; return next(); }
+  if (isAdmin(req)) { req.username = 'admin'; return next(); }
+  return res.status(401).json({ error: 'unauthenticated' });
+}
+
 module.exports = {
   requireApi, requirePage, setCookie, clearCookie, COOKIE_NAME,
-  setAdminCookie, clearAdminCookie, isAdmin, requireAdmin, ADMIN_COOKIE,
+  setAdminCookie, clearAdminCookie, isAdmin, requireAdmin,
+  requireAdminOnly, requireAnyAuth, ADMIN_COOKIE,
 };
 

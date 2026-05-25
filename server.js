@@ -9,6 +9,7 @@ const { ADMIN_PASSWORD_HASH } = require('./config/admin');
 const {
   requireApi, requirePage, setCookie, clearCookie,
   setAdminCookie, clearAdminCookie, isAdmin, requireAdmin,
+  requireAdminOnly, requireAnyAuth,
 } = require('./middleware/auth');
 
 const app = express();
@@ -19,6 +20,13 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // — admin re-faz upload de manhã. Cabe ~70 KB total, irrelevante pra RAM.
 const FILE_KEYS = ['resumo', 'bbx', 'servicosRealizados', 'cuidadosFaciais', 'lojaDigital'];
 const fileStore = {};
+
+const metaStore = {
+  metaPRM: '33', metaTurbinado: '31', metaID: '115',
+  metaNPS: '90', metaResgate: '52', metaBBX: '20',
+  metaItensBoleto: '2.7', metaAuditoria: '95',
+  metaDigitalReceita: '15000', metaDigitalConversao: '12', metaDigitalBM: '190',
+};
 
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
@@ -44,6 +52,24 @@ app.get('/api/me', requireApi, (req, res) => {
 });
 
 // ---------- Admin: senha mestra desbloqueia upload de planilhas ----------
+app.post('/api/admin/login', async (req, res) => {
+  const { password } = req.body || {};
+  const ok = await bcrypt.compare(password || '', ADMIN_PASSWORD_HASH);
+  if (!ok) return res.status(401).json({ error: 'invalid_admin_password' });
+  setAdminCookie(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  clearAdminCookie(res);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/me', (req, res) => {
+  res.json({ isAdmin: isAdmin(req) });
+});
+
+// Legacy — mantido para compatibilidade
 app.post('/api/admin/verify', requireApi, async (req, res) => {
   const { password } = req.body || {};
   const ok = await bcrypt.compare(password || '', ADMIN_PASSWORD_HASH);
@@ -62,7 +88,7 @@ const RAW_XLSX = express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
   limit: '10mb',
 });
-app.post('/api/admin/upload', requireApi, requireAdmin, RAW_XLSX, (req, res) => {
+app.post('/api/admin/upload', requireAdminOnly, RAW_XLSX, (req, res) => {
   const key = req.query.key;
   const filename = String(req.query.filename || '').slice(0, 200) || `upload-${Date.now()}.xlsx`;
   if (!FILE_KEYS.includes(key)) return res.status(400).json({ error: 'invalid_key' });
@@ -76,8 +102,21 @@ app.post('/api/admin/upload', requireApi, requireAdmin, RAW_XLSX, (req, res) => 
   res.json({ ok: true, key, size: req.body.length, mtime: fileStore[key].mtime });
 });
 
-// Metadados — qualquer usuária logada pode ver o que tem disponível
-app.get('/api/files', requireApi, (req, res) => {
+// ---------- Metas globais (em memória, admin gerencia) ----------
+app.get('/api/metas', (req, res) => {
+  res.json({ ...metaStore });
+});
+
+app.post('/api/metas', requireAdminOnly, (req, res) => {
+  const updates = req.body || {};
+  for (const [key, val] of Object.entries(updates)) {
+    if (key in metaStore) metaStore[key] = String(val);
+  }
+  res.json({ ok: true, metas: { ...metaStore } });
+});
+
+// Metadados — qualquer usuária logada ou admin pode ver o que tem disponível
+app.get('/api/files', requireAnyAuth, (req, res) => {
   const out = {};
   for (const k of FILE_KEYS) {
     if (fileStore[k]) {
@@ -90,8 +129,8 @@ app.get('/api/files', requireApi, (req, res) => {
   res.json(out);
 });
 
-// Bytes da planilha — qualquer usuária logada baixa
-app.get('/api/files/:key', requireApi, (req, res) => {
+// Bytes da planilha — qualquer usuária logada ou admin baixa
+app.get('/api/files/:key', requireAnyAuth, (req, res) => {
   const k = req.params.key;
   if (!FILE_KEYS.includes(k)) return res.status(400).json({ error: 'invalid_key' });
   const f = fileStore[k];
@@ -124,9 +163,12 @@ app.post('/api/slack/send', requireApi, async (req, res) => {
   }
 });
 
-// ---------- Static (sem auth: só login + assets do login) ----------
+// ---------- Static (sem auth: login + admin) ----------
 app.get('/login.html', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'login.html'));
+});
+app.get('/admin.html', (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
 
 // ---------- Página principal protegida ----------

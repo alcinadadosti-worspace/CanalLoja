@@ -69,6 +69,14 @@ button {
 button:hover { background: #f0d088; }
 button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-admin {
+  width: 100%; background: transparent; color: var(--ink-mute);
+  border: 1px dashed var(--line); border-radius: 4px; padding: 10px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: border-color 150ms, color 150ms;
+  letter-spacing: 0.05em; text-transform: uppercase; margin-top: 12px;
+}
+.btn-admin:hover { border-color: var(--accent); color: var(--accent); }
 .error {
   margin-top: 14px; padding: 10px 12px; background: rgba(211,84,84,0.1);
   border: 1px solid rgba(211,84,84,0.3); border-radius: 4px;
@@ -100,6 +108,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     <button type="submit" id="submitBtn">Entrar</button>
     <div class="error" id="error"></div>
   </form>
+
+  <button type="button" class="btn-admin" onclick="window.location.href='/admin.html'">Entrar como Admin</button>
 
   <div class="hint">
     <strong>Acessos:</strong> leidiane (master) · taciane · kemilly · mariane (digital)
