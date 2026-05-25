@@ -1339,7 +1339,7 @@
     <div class="section-label">03 / Metas do mês</div>
     <div class="section-title">Receita, skin & indicadores</div>
     <div class="section-desc">Metas marcadas com <span style="color:var(--green)">●</span> vêm direto da planilha. As outras você cadastra.</div>
-    <div class="field-group">
+    <div class="field-group" id="metaGroupReceita">
       <div class="field-group-title">Receita mensal <span class="badge">R$</span></div>
       <div class="seller-meta-row">
         <div class="name">Loja (total) <span id="autoIndReceitaLoja" style="color:var(--green); font-size:9px; margin-left:4px;">● auto</span></div>
@@ -1347,7 +1347,7 @@
       </div>
       <div id="receitaSellersMetas"></div>
     </div>
-    <div class="field-group">
+    <div class="field-group" id="metaGroupSkin">
       <div class="field-group-title">Skin mensal (Cuidados Faciais + Botik) <span class="badge">R$</span></div>
       <div class="seller-meta-row">
         <div class="name">Loja (total)</div>
@@ -1355,7 +1355,7 @@
       </div>
       <div id="skinSellersMetas"></div>
     </div>
-    <div class="field-group">
+    <div class="field-group" id="metaGroupIndicadores">
       <div class="field-group-title">Indicadores · alvos da loja</div>
       <div class="field-row-3">
         <div class="field">
@@ -1376,25 +1376,23 @@
         <div class="field"><label>Auditoria (%)</label><input type="text" class="money-input" id="metaAuditoria" placeholder="95"></div>
       </div>
 
-      <!-- Metas Loja Digital — canal próprio operado pela Anny -->
-      <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line);">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent); margin-bottom:8px; letter-spacing:0.05em;">
-          🌐 METAS DO CANAL LOJA DIGITAL (Anny)
-        </div>
-        <div class="field-row-3">
-          <div class="field"><label>Receita Digital (R$)</label><input type="text" class="money-input" id="metaDigitalReceita" placeholder="15.000"></div>
-          <div class="field"><label>Conversão Digital (%)</label><input type="text" class="money-input" id="metaDigitalConversao" placeholder="12"></div>
-          <div class="field"><label>Boleto Médio Digital (R$)</label><input type="text" class="money-input" id="metaDigitalBM" placeholder="190"></div>
-        </div>
-      </div>
-
       <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
         <button class="secondary" id="resetGlobalMetas" style="font-size:11px; padding:6px 12px;">
           Resetar para padrão (33%, 31%, 115%, etc)
         </button>
         <span style="font-family:JetBrains Mono,monospace; font-size:10px; color:var(--ink-dim);">
-          PRM:33% · Turbinado:31% · ID:115% · NPS:90% · Resgate:52% · BBX:20% · Itens:2,7 · Audit:95% · 🌐 R$15k/12%/R$190
+          PRM:33% · Turbinado:31% · ID:115% · NPS:90% · Resgate:52% · BBX:20% · Itens:2,7 · Audit:95%
         </span>
+      </div>
+    </div>
+
+    <!-- Metas Loja Digital — bloco separado, visível para todos -->
+    <div class="field-group" id="metaGroupDigital">
+      <div class="field-group-title" style="color:var(--accent);">🌐 Metas do Canal Loja Digital</div>
+      <div class="field-row-3">
+        <div class="field"><label>Receita Digital (R$)</label><input type="text" class="money-input" id="metaDigitalReceita" placeholder="15.000"></div>
+        <div class="field"><label>Conversão Digital (%)</label><input type="text" class="money-input" id="metaDigitalConversao" placeholder="12"></div>
+        <div class="field"><label>Boleto Médio Digital (R$)</label><input type="text" class="money-input" id="metaDigitalBM" placeholder="190"></div>
       </div>
     </div>
   </section>
@@ -3919,7 +3917,15 @@ function applyRoleFiltering() {
     }
   }
 
-  // 2. Metas globais (gerenciadas pelo admin) — readonly para todos
+  // 2. Perfil digital: esconde metas de loja (só mostra metas digitais)
+  if (u.role === 'digital') {
+    ['metaGroupReceita', 'metaGroupSkin', 'metaGroupIndicadores'].forEach(id => {
+      const el = $(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+
+  // 3. Metas globais (gerenciadas pelo admin) — readonly para todos
   const ADMIN_MANAGED_METAS = [
     'metaPRM', 'metaTurbinado', 'metaID', 'metaResgate', 'metaBBX',
     'metaNPS', 'metaItensBoleto', 'metaAuditoria',
