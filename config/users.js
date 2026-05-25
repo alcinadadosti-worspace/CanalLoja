@@ -7,10 +7,10 @@
 // Use `npm run hash -- <novaSenha>` para gerar um novo hash.
 
 const DEFAULT_HASHES = {
-  leidiane: '$2a$10$SpyDM9eOcN8bRatoEg.I4elIqjnp23Q3weeOqxxzZiN1JpejMSlh2',
-  taciane:  '$2a$10$z4DiPIkZq3lG0QlpIDMklepE97HSKza/yBApvzKh8zLKr4Aln/N.O',
-  kemilly:  '$2a$10$arlRrCepxJbMbchdRyNX4u1.CAwR2rxjQ0iIVEMTkCfFR2/oE9Nla',
-  mariane:  '$2a$10$pslONKT/LHfjq2blowVJUe5MwrGyQa3k.nStLXSU4SysqXthZXW3O',
+  leidiane: '$2a$10$IfezCOM6AMk8YzH/chYDqeDRY6y90zTIpvpawJeHApsw2dTTidQLW',
+  taciane:  '$2a$10$IKMtErGDQs8aHEGxBLeqkesj6al.ljNkEOueWa5ZAb3j5.T5Qg9i6',
+  kemilly:  '$2a$10$lU3ZBXXNcSh3uxsjad08weL0O3ouf5Fq2sh21Igi1i1pXzocQkN/a',
+  mariane:  '$2a$10$BTxBYkjCcmeXOodtGsVO9eGRovzt1pNTLMgQGmvD0dCfDXpqp/2EG',
 };
 
 function hashFor(username) {
