@@ -26,6 +26,11 @@ services:
       # Gere com `npm run hash -- <senha>` e cole aqui.
       - key: ADMIN_PASSWORD_HASH
         sync: false
+      # Supabase — persistencia de planilhas e metas
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       # Slack — preencher quando integrar o bot
       - key: SLACK_WEBHOOK_URL
         sync: false

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
@@ -11,22 +12,22 @@ const {
   setAdminCookie, clearAdminCookie, isAdmin, requireAdmin,
   requireAdminOnly, requireAnyAuth,
 } = require('./middleware/auth');
+const supa = require('./lib/supabase');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-// Storage em memória das 5 planilhas. Some quando o servidor dorme (Free tier)
-// — admin re-faz upload de manhã. Cabe ~70 KB total, irrelevante pra RAM.
 const FILE_KEYS = ['resumo', 'bbx', 'servicosRealizados', 'cuidadosFaciais', 'lojaDigital'];
 const fileStore = {};
 
-const metaStore = {
+const META_DEFAULTS = {
   metaPRM: '33', metaTurbinado: '31', metaID: '115',
   metaNPS: '90', metaResgate: '52', metaBBX: '20',
   metaItensBoleto: '2.7', metaAuditoria: '95',
   metaDigitalReceita: '15000', metaDigitalConversao: '12', metaDigitalBM: '190',
 };
+const metaStore = { ...META_DEFAULTS };
 
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
@@ -69,7 +70,7 @@ app.get('/api/admin/me', (req, res) => {
   res.json({ isAdmin: isAdmin(req) });
 });
 
-// Legacy — mantido para compatibilidade
+// Legacy
 app.post('/api/admin/verify', requireApi, async (req, res) => {
   const { password } = req.body || {};
   const ok = await bcrypt.compare(password || '', ADMIN_PASSWORD_HASH);
@@ -83,39 +84,53 @@ app.post('/api/admin/lock', requireApi, (req, res) => {
   res.json({ ok: true });
 });
 
-// Recebe bytes brutos (multipart é overkill pra 1 arquivo por request)
+// Recebe bytes brutos
 const RAW_XLSX = express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
   limit: '10mb',
 });
-app.post('/api/admin/upload', requireAdminOnly, RAW_XLSX, (req, res) => {
+app.post('/api/admin/upload', requireAdminOnly, RAW_XLSX, async (req, res) => {
   const key = req.query.key;
   const filename = String(req.query.filename || '').slice(0, 200) || `upload-${Date.now()}.xlsx`;
   if (!FILE_KEYS.includes(key)) return res.status(400).json({ error: 'invalid_key' });
   if (!req.body || !req.body.length) return res.status(400).json({ error: 'no_data' });
-  fileStore[key] = {
-    filename, bytes: req.body,
-    mtime: new Date().toISOString(),
-    uploader: req.username,
-    size: req.body.length,
+
+  const meta = {
+    filename, mtime: new Date().toISOString(),
+    uploader: req.username, size: req.body.length,
   };
-  res.json({ ok: true, key, size: req.body.length, mtime: fileStore[key].mtime });
+  fileStore[key] = { ...meta, bytes: req.body };
+
+  try { await supa.uploadFile(key, req.body, meta); }
+  catch (e) { console.warn('[supabase] upload:', e.message); }
+
+  res.json({ ok: true, key, size: req.body.length, mtime: meta.mtime });
 });
 
-// ---------- Metas globais (em memória, admin gerencia) ----------
+// Limpa todas as planilhas (admin)
+app.post('/api/admin/clear-files', requireAdminOnly, async (req, res) => {
+  for (const key of FILE_KEYS) delete fileStore[key];
+  try { await supa.deleteAllFiles(FILE_KEYS); }
+  catch (e) { console.warn('[supabase] clear:', e.message); }
+  res.json({ ok: true });
+});
+
+// ---------- Metas globais ----------
 app.get('/api/metas', (req, res) => {
   res.json({ ...metaStore });
 });
 
-app.post('/api/metas', requireAdminOnly, (req, res) => {
+app.post('/api/metas', requireAdminOnly, async (req, res) => {
   const updates = req.body || {};
   for (const [key, val] of Object.entries(updates)) {
     if (key in metaStore) metaStore[key] = String(val);
   }
+  try { await supa.saveMetas({ ...metaStore }); }
+  catch (e) { console.warn('[supabase] metas:', e.message); }
   res.json({ ok: true, metas: { ...metaStore } });
 });
 
-// Metadados — qualquer usuária logada ou admin pode ver o que tem disponível
+// Metadados
 app.get('/api/files', requireAnyAuth, (req, res) => {
   const out = {};
   for (const k of FILE_KEYS) {
@@ -129,7 +144,7 @@ app.get('/api/files', requireAnyAuth, (req, res) => {
   res.json(out);
 });
 
-// Bytes da planilha — qualquer usuária logada ou admin baixa
+// Bytes da planilha
 app.get('/api/files/:key', requireAnyAuth, (req, res) => {
   const k = req.params.key;
   if (!FILE_KEYS.includes(k)) return res.status(400).json({ error: 'invalid_key' });
@@ -141,7 +156,7 @@ app.get('/api/files/:key', requireAnyAuth, (req, res) => {
   res.send(f.bytes);
 });
 
-// Placeholder — quando implementar o bot Slack, usar o webhook do .env
+// Placeholder Slack
 app.post('/api/slack/send', requireApi, async (req, res) => {
   const webhook = process.env.SLACK_WEBHOOK_URL;
   if (!webhook) {
@@ -163,7 +178,7 @@ app.post('/api/slack/send', requireApi, async (req, res) => {
   }
 });
 
-// ---------- Static (sem auth: login + admin) ----------
+// ---------- Static ----------
 app.get('/login.html', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'login.html'));
 });
@@ -171,8 +186,7 @@ app.get('/admin.html', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
 
-// ---------- Página principal protegida ----------
-// Lê index.html do disco e injeta window.currentUser antes de servir
+// Página principal protegida
 const INDEX_TEMPLATE = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
 
 function renderIndex(username) {
@@ -186,9 +200,40 @@ app.get(['/', '/index.html'], requirePage, (req, res) => {
   res.type('html').send(renderIndex(req.username));
 });
 
-// Demais arquivos do /public/ exigem auth (ex: auth.js do app principal)
 app.use(requirePage, express.static(PUBLIC_DIR, { index: false }));
 
-app.listen(PORT, () => {
-  console.log(`canalloja rodando em http://localhost:${PORT}`);
-});
+// ---------- Startup: restaura dados do Supabase ----------
+async function restoreFromSupabase() {
+  if (!supa.isConfigured()) {
+    console.log('[supabase] nao configurado — usando apenas memoria');
+    return;
+  }
+  try {
+    await supa.initBucket();
+
+    const metas = await supa.getMetas(META_DEFAULTS);
+    Object.assign(metaStore, metas);
+    console.log('[supabase] metas restauradas');
+
+    const filesMeta = await supa.getFilesMeta();
+    let count = 0;
+    for (const [key, meta] of Object.entries(filesMeta)) {
+      if (!FILE_KEYS.includes(key)) continue;
+      const bytes = await supa.downloadFile(key);
+      if (bytes) {
+        fileStore[key] = { ...meta, bytes };
+        count++;
+      }
+    }
+    if (count) console.log(`[supabase] ${count} planilha(s) restaurada(s)`);
+  } catch (e) {
+    console.warn('[supabase] falha ao restaurar:', e.message);
+  }
+}
+
+(async () => {
+  await restoreFromSupabase();
+  app.listen(PORT, () => {
+    console.log(`canalloja rodando em http://localhost:${PORT}`);
+  });
+})();

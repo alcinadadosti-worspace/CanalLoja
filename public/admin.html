@@ -217,6 +217,10 @@ section {
       <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none">
 
       <div class="file-grid" id="fileGrid"></div>
+
+      <div class="btn-row" style="margin-top:16px;">
+        <button class="btn-secondary" id="clearFiles" style="color:var(--red); border-color:rgba(211,84,84,0.4);">Limpar todas as planilhas</button>
+      </div>
     </section>
 
     <!-- METAS GLOBAIS -->
@@ -423,6 +427,22 @@ dz.addEventListener('drop', e => {
   e.preventDefault();
   dz.classList.remove('dragging');
   handleFiles([...e.dataTransfer.files]);
+});
+
+// ---------- Clear files ----------
+$('clearFiles').addEventListener('click', async () => {
+  if (!confirm('Tem certeza? Isso apaga todas as 5 planilhas do servidor.')) return;
+  try {
+    const r = await fetch('/api/admin/clear-files', { method: 'POST' });
+    if (r.ok) {
+      toast('Planilhas apagadas.');
+      loadFiles();
+    } else {
+      toast('Erro ao apagar.');
+    }
+  } catch (e) {
+    toast('Erro: ' + e.message);
+  }
 });
 
 // ---------- Metas ----------
