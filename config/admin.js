@@ -2,7 +2,7 @@
 // Default = "admin". Em produção, sobrescrever via ENV ADMIN_PASSWORD_HASH.
 // Gere um hash novo com: npm run hash -- <novaSenha>
 
-const DEFAULT_ADMIN_HASH = '$2a$10$.CYOdFY9yfyrHgB66/32cesvR3zczAl5Euv60n/mMRNMfEICwj0Ke';
+const DEFAULT_ADMIN_HASH = '$2a$10$ixE6BRwXdZKM6w04AR6BkuqVcL4FRqow4xowVEawIcVtDEsCFC//.';
 
 if (!process.env.ADMIN_PASSWORD_HASH) {
   console.warn('[admin] Usando senha padrao do admin. Defina ADMIN_PASSWORD_HASH em producao.');
