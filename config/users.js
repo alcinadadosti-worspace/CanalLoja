@@ -31,7 +31,7 @@ const ROLES = {
     label: 'Master',
     allowedPdvs: '*',
     tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos', 'digital'],
-    sections: ['upload', 'store', 'metas', 'generate', 'dashboard', 'output'],
+    sections: ['dashboard'],
     editable: {
       global:  ['metaPRM', 'metaTurbinado', 'metaID', 'metaResgate', 'metaBBX'],
       hub:     [],
@@ -42,7 +42,7 @@ const ROLES = {
     label: 'Hub Sul (Penedo · Coruripe · Teotônio)',
     allowedPdvs: ['24669', '24670', '24671'],
     tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos'],
-    sections: ['upload', 'store', 'metas', 'generate', 'dashboard', 'output'],
+    sections: ['dashboard'],
     editable: {
       global:  [],
       hub:     ['metaSkinLoja', 'metaNPS', 'metaItensBoleto', 'metaAuditoria',
@@ -55,7 +55,7 @@ const ROLES = {
     label: 'Hub Norte (Sustentável · Palmeira · São Sebastião)',
     allowedPdvs: ['24617', '24668', '24303'],
     tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos'],
-    sections: ['upload', 'store', 'metas', 'generate', 'dashboard', 'output'],
+    sections: ['dashboard'],
     editable: {
       global:  [],
       hub:     ['metaSkinLoja', 'metaNPS', 'metaItensBoleto', 'metaAuditoria',
@@ -68,7 +68,7 @@ const ROLES = {
     label: 'Canal Loja Digital',
     allowedPdvs: '*',
     tabs: ['digital'],
-    sections: ['upload', 'metas', 'dashboard'],
+    sections: ['dashboard'],
     editable: {
       global:  [],
       hub:     [],

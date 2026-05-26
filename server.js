@@ -28,6 +28,8 @@ const META_DEFAULTS = {
   metaDigitalReceita: '15000', metaDigitalConversao: '12', metaDigitalBM: '190',
 };
 const metaStore = { ...META_DEFAULTS };
+const storeMetasStore = {};
+const sellerMetasStore = {};
 
 // ---------- Rate limiter (login endpoints) ----------
 const loginAttempts = new Map();
@@ -197,6 +199,49 @@ app.post('/api/metas', requireAdminOnly, async (req, res) => {
   res.json(resp);
 });
 
+// ---------- Metas por loja ----------
+app.get('/api/store-metas', requireAnyAuth, (req, res) => {
+  res.json({ ...storeMetasStore });
+});
+
+app.post('/api/store-metas/:pdv', requireAdminOnly, async (req, res) => {
+  const pdv = req.params.pdv;
+  if (!/^\d{4,6}$/.test(pdv)) return res.status(400).json({ error: 'invalid_pdv' });
+  const updates = req.body || {};
+  if (!storeMetasStore[pdv]) storeMetasStore[pdv] = {};
+  for (const [key, val] of Object.entries(updates)) {
+    const str = String(val).trim().replace(',', '.');
+    if (str === '') { delete storeMetasStore[pdv][key]; continue; }
+    if (str.length > 20) continue;
+    storeMetasStore[pdv][key] = str;
+  }
+  let backupOk = true;
+  try { await supa.saveStoreMetas({ ...storeMetasStore }); }
+  catch (e) { console.warn('[supabase] store-metas:', e.message); backupOk = false; }
+  const resp = { ok: true, pdv, metas: storeMetasStore[pdv] };
+  if (!backupOk) resp.warning = 'Metas salvas em memoria, mas backup falhou.';
+  res.json(resp);
+});
+
+// ---------- Metas por consultora ----------
+app.get('/api/seller-metas', requireAnyAuth, (req, res) => {
+  res.json({ ...sellerMetasStore });
+});
+
+app.post('/api/seller-metas', requireAdminOnly, async (req, res) => {
+  const updates = req.body || {};
+  for (const [name, metas] of Object.entries(updates)) {
+    if (typeof metas !== 'object' || !metas) continue;
+    sellerMetasStore[name] = { ...(sellerMetasStore[name] || {}), ...metas };
+  }
+  let backupOk = true;
+  try { await supa.saveSellerMetas({ ...sellerMetasStore }); }
+  catch (e) { console.warn('[supabase] seller-metas:', e.message); backupOk = false; }
+  const resp = { ok: true, count: Object.keys(sellerMetasStore).length };
+  if (!backupOk) resp.warning = 'Metas salvas em memoria, mas backup falhou.';
+  res.json(resp);
+});
+
 // Metadados
 app.get('/api/files', requireAnyAuth, (req, res) => {
   const out = {};
@@ -283,6 +328,14 @@ async function restoreFromSupabase() {
     const metas = await supa.getMetas(META_DEFAULTS);
     Object.assign(metaStore, metas);
     console.log('[supabase] metas restauradas');
+
+    const sm = await supa.getStoreMetas();
+    Object.assign(storeMetasStore, sm);
+    if (Object.keys(sm).length) console.log(`[supabase] metas por loja restauradas (${Object.keys(sm).length} lojas)`);
+
+    const slm = await supa.getSellerMetas();
+    Object.assign(sellerMetasStore, slm);
+    if (Object.keys(slm).length) console.log(`[supabase] metas por consultora restauradas (${Object.keys(slm).length} pessoas)`);
 
     const filesMeta = await supa.getFilesMeta();
     let count = 0;

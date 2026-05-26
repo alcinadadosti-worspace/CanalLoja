@@ -1298,8 +1298,8 @@
 
 <main>
 
-  <!-- 01 UPLOAD -->
-  <section>
+  <!-- 01 UPLOAD (hidden — managed via admin.html) -->
+  <section id="uploadSection" style="display:none">
     <div class="section-label">01 / Planilhas</div>
     <div class="section-title">Planilhas do dia</div>
     <div class="section-desc" id="uploadDesc">Carregando última atualização…</div>
@@ -1442,9 +1442,13 @@
   <!-- 05 OUTPUT -->
   <!-- DASHBOARD -->
   <section id="dashboardSection" style="display:none">
-    <div class="section-label">04.5 / Painel visual</div>
+    <div class="section-label">Painel visual</div>
     <div class="section-title">Performance do ciclo</div>
-    <div class="section-desc">Visão rápida antes de mandar pro Slack.</div>
+    <div class="section-desc">Indicadores da loja selecionada no ciclo atual.</div>
+    <div class="field" style="max-width:320px; margin-bottom:20px" id="dashStoreWrap">
+      <label>Loja</label>
+      <select id="dashStoreSelect"></select>
+    </div>
 
     <div class="dash-tabs">
       <button class="dash-tab active" data-tab="loja">Loja Atual</button>
@@ -1972,8 +1976,8 @@ function detectStoresAndSellers() {
   // renderDigitalTab() direto, pulando renderDashboard que exige selectedPdv.
   if (window.currentUser?.role === 'digital') {
     if (loadedWorkbooks.lojaDigital) {
-      $('metasSection').style.display = 'block';
       $('dashboardSection').style.display = 'block';
+      if ($('dashStoreWrap')) $('dashStoreWrap').style.display = 'none';
       checkDataFreshness();
       try { renderDigitalTab(); } catch(e) { console.error('renderDigitalTab:', e); }
     }
@@ -2095,10 +2099,13 @@ function checkDataFreshness() {
 
 function renderStoreSelect() {
   const sel = $('storeSelect');
+  const dashSel = $('dashStoreSelect');
   sel.innerHTML = '';
+  if (dashSel) dashSel.innerHTML = '';
   const pdvs = Object.keys(storesCatalog).sort();
   if (pdvs.length === 0) {
     sel.innerHTML = '<option>— nenhuma loja detectada —</option>';
+    if (dashSel) dashSel.innerHTML = '<option>— nenhuma loja detectada —</option>';
     return;
   }
   for (const pdv of pdvs) {
@@ -2107,9 +2114,10 @@ function renderStoreSelect() {
     const count = storesCatalog[pdv].sellers.size;
     opt.textContent = `${storeLabel(pdv)}  ·  ${count} consultora${count !== 1 ? 's' : ''}`;
     sel.appendChild(opt);
+    if (dashSel) dashSel.appendChild(opt.cloneNode(true));
   }
-  if (selectedPdv && pdvs.includes(selectedPdv)) sel.value = selectedPdv;
-  else selectedPdv = sel.value;
+  if (selectedPdv && pdvs.includes(selectedPdv)) { sel.value = selectedPdv; if (dashSel) dashSel.value = selectedPdv; }
+  else { selectedPdv = sel.value; if (dashSel) dashSel.value = selectedPdv; }
 
   // Popula também o seletor de comparação (com opção "nenhuma" + todas as lojas exceto a selecionada)
   const compareSel = $('compareStoreSelect');
@@ -2128,6 +2136,7 @@ function renderStoreSelect() {
 
   renderSellers();
   updateAutoMetas();
+  if (window._applyServerStoreMetas) window._applyServerStoreMetas(selectedPdv);
   renderDashboard();
 }
 
@@ -4002,8 +4011,66 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   loadGlobalMetas();
 
+  // Carrega metas por loja e por consultora do servidor
+  let serverStoreMetas = {};
+  let serverSellerMetas = {};
+
+  async function loadServerStoreMetas() {
+    try {
+      const r = await fetch('/api/store-metas');
+      if (!r.ok) return;
+      serverStoreMetas = await r.json();
+    } catch {}
+  }
+
+  async function loadServerSellerMetas() {
+    try {
+      const r = await fetch('/api/seller-metas');
+      if (!r.ok) return;
+      serverSellerMetas = await r.json();
+    } catch {}
+  }
+
+  function applyServerStoreMetas(pdv) {
+    const m = serverStoreMetas[pdv];
+    if (!m) return;
+    const MAP = { receitaLoja: 'metaReceitaLoja', boletoMedio: 'metaBoleto', skinLoja: 'metaSkinLoja', npsLoja: 'npsLoja', auditoriaLoja: 'auditoriaLoja' };
+    for (const [k, domId] of Object.entries(MAP)) {
+      const el = $(domId);
+      if (el && m[k]) { el.value = m[k]; el.readOnly = true; }
+    }
+  }
+
+  function applyServerSellerMetas(pdv) {
+    if (!Object.keys(serverSellerMetas).length) return;
+    for (const [name, data] of Object.entries(serverSellerMetas)) {
+      if (data.pdv !== pdv) continue;
+      const can = name.toUpperCase();
+      if (!metaPerSeller[can]) metaPerSeller[can] = {};
+      if (data.receita) metaPerSeller[can].receita = String(Math.round(data.receita));
+      if (data.boletoMedio) metaPerSeller[can].boletoMedio = String(Math.round(data.boletoMedio));
+      if (data.skin) metaPerSeller[can].skin = String(Math.round(data.skin));
+      if (data.servicos) metaPerSeller[can].servicos = String(Math.round(data.servicos));
+      if (data.itensBoleto) metaPerSeller[can].itensBoleto = String(data.itensBoleto);
+    }
+  }
+
+  loadServerStoreMetas();
+  loadServerSellerMetas();
+  window._applyServerStoreMetas = function(pdv) { applyServerStoreMetas(pdv); applyServerSellerMetas(pdv); };
+
+  // Dashboard store selector — syncs with hidden storeSelect
+  const dashSelEl = $('dashStoreSelect');
+  if (dashSelEl) {
+    dashSelEl.addEventListener('change', e => {
+      $('storeSelect').value = e.target.value;
+      $('storeSelect').dispatchEvent(new Event('change'));
+    });
+  }
+
   $('storeSelect').addEventListener('change', e => {
     selectedPdv = e.target.value;
+    if (dashSelEl) dashSelEl.value = selectedPdv;
     saveState();
     // Refresh do seletor de comparação (remove a loja atualmente selecionada da lista)
     const compareSel = $('compareStoreSelect');
@@ -4024,6 +4091,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     renderSellers();
     updateAutoMetas();
+    if (window._applyServerStoreMetas) window._applyServerStoreMetas(selectedPdv);
     renderDashboard();
   });
 

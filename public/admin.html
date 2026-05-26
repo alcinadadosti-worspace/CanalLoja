@@ -258,6 +258,46 @@ section {
       </div>
     </section>
 
+    <!-- METAS POR LOJA -->
+    <section>
+      <div class="section-label">03 / Metas por loja</div>
+      <div class="section-title">Indicadores por loja</div>
+      <div class="section-desc">Defina metas especificas para cada loja do CP. Estas metas aparecem no painel de cada gestora.</div>
+
+      <div class="field" style="max-width:320px; margin-bottom:18px">
+        <label>Loja</label>
+        <select id="storeMetaSelect">
+          <option value="24303">Sao Sebastiao (24303)</option>
+          <option value="24617">Sustentavel (24617)</option>
+          <option value="24668">Palmeira (24668)</option>
+          <option value="24669">Penedo (24669)</option>
+          <option value="24670">Coruripe (24670)</option>
+          <option value="24671">Teotonio (24671)</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <div class="section-label" style="margin-bottom:10px; color:var(--accent);">Receita & Skin</div>
+        <div class="meta-grid">
+          <div class="meta-field"><label>Receita Loja (R$)</label><input type="text" id="smReceitaLoja" placeholder="ex: 50000"></div>
+          <div class="meta-field"><label>Boleto Medio (R$)</label><input type="text" id="smBoletoMedio" placeholder="ex: 400"></div>
+          <div class="meta-field"><label>Skin Loja (R$)</label><input type="text" id="smSkinLoja" placeholder="ex: 3000"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="section-label" style="margin-bottom:10px; color:var(--accent);">NPS & Auditoria</div>
+        <div class="meta-grid">
+          <div class="meta-field"><label>NPS Loja (%)</label><input type="text" id="smNpsLoja" placeholder="ex: 90"></div>
+          <div class="meta-field"><label>Auditoria Loja (%)</label><input type="text" id="smAuditoriaLoja" placeholder="ex: 95"></div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button id="saveStoreMetas">Salvar metas da loja</button>
+      </div>
+    </section>
+
   </div>
 </div>
 
@@ -340,6 +380,7 @@ function showAdminPanel() {
   $('adminView').style.display = 'block';
   loadFiles();
   loadMetas();
+  loadStoreMetas();
 }
 
 $('logoutBtn').addEventListener('click', async () => {
@@ -485,6 +526,54 @@ $('resetMetas').addEventListener('click', () => {
     if (el) el.value = val;
   }
   toast('Metas resetadas para o padrao. Clique em Salvar para confirmar.');
+});
+
+// ---------- Store Metas ----------
+const STORE_META_FIELDS = ['smReceitaLoja', 'smBoletoMedio', 'smSkinLoja', 'smNpsLoja', 'smAuditoriaLoja'];
+const SM_KEY_MAP = { smReceitaLoja: 'receitaLoja', smBoletoMedio: 'boletoMedio', smSkinLoja: 'skinLoja', smNpsLoja: 'npsLoja', smAuditoriaLoja: 'auditoriaLoja' };
+let allStoreMetas = {};
+
+async function loadStoreMetas() {
+  try {
+    const r = await fetch('/api/store-metas');
+    if (!r.ok) return;
+    allStoreMetas = await r.json();
+    applyStoreMetasToForm();
+  } catch {}
+}
+
+function applyStoreMetasToForm() {
+  const pdv = $('storeMetaSelect').value;
+  const metas = allStoreMetas[pdv] || {};
+  for (const domId of STORE_META_FIELDS) {
+    const el = $(domId);
+    if (el) el.value = metas[SM_KEY_MAP[domId]] || '';
+  }
+}
+
+$('storeMetaSelect').addEventListener('change', applyStoreMetasToForm);
+
+$('saveStoreMetas').addEventListener('click', async () => {
+  const pdv = $('storeMetaSelect').value;
+  const body = {};
+  for (const domId of STORE_META_FIELDS) {
+    const el = $(domId);
+    if (el) body[SM_KEY_MAP[domId]] = el.value;
+  }
+  try {
+    const r = await fetch(`/api/store-metas/${pdv}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) {
+      if (!allStoreMetas[pdv]) allStoreMetas[pdv] = {};
+      Object.assign(allStoreMetas[pdv], body);
+      toast(`Metas da loja ${pdv} salvas!`);
+    } else toast('Erro ao salvar metas da loja.');
+  } catch (e) {
+    toast('Erro: ' + e.message);
+  }
 });
 
 // Auto-check if already authenticated
