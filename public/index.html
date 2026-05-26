@@ -1474,12 +1474,7 @@
         <div class="dashboard stagger" id="dashLojaCards"></div>
       </div>
       <div class="dash-section">
-        <div class="dash-section-title" style="display:flex; align-items:center; justify-content:space-between;">
-          Consultoras — destaques
-          <button id="slackSendBtn" class="secondary" style="font-size:11px; padding:6px 14px; border-radius:4px;">
-            Enviar para Slack
-          </button>
-        </div>
+        <div class="dash-section-title">Consultoras — destaques</div>
         <div id="dashSellers"></div>
       </div>
     </div>
@@ -3250,9 +3245,9 @@ function renderDashboard() {
       </div>`;
     };
     return `<div class="dash-seller">
-      <div class="dash-seller-name">
-        ${aliasOf(s.can)}
-        <span class="dash-seller-medal">${medal}</span>
+      <div class="dash-seller-name" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>${aliasOf(s.can)} <span class="dash-seller-medal">${medal}</span></span>
+        <button class="secondary slack-seller-btn" data-seller-idx="${idx}" style="font-size:10px; padding:4px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace;">Enviar Slack</button>
       </div>
       ${row('Receita', fmtBRL(s.ps.receita), s.pctR)}
       ${row('Skin', fmtBRL(s.ps.skin), s.pctS)}
@@ -3269,27 +3264,30 @@ function renderDashboard() {
 
   $('dashSellers').innerHTML = sellersHtml;
 
-  // Store seller data for Slack sending
+  // Store seller data for Slack sending (individual DMs)
+  const today = new Date();
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  let diasRestantes = 0;
+  for (let d = new Date(today); d <= endOfMonth; d.setDate(d.getDate() + 1)) {
+    const dow = d.getDay();
+    if (dow !== 0) diasRestantes++;
+  }
+  if (diasRestantes < 1) diasRestantes = 1;
+  const fmtDate = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
+  const slackDot = (pct) => pct >= 1 ? ':large_green_circle:' : pct >= 0.5 ? ':large_yellow_circle:' : pct > 0 ? ':red_circle:' : ':red_circle:';
+  const faltando = (meta, atual) => meta > 0 ? Math.max(0, meta - atual) : 0;
+
   window._slackSellerData = sellerScores.map((s, idx) => {
-    const medal = idx < 3 ? medals[idx] : '';
-    const dot = (pct) => pct >= 1 ? '🟢' : pct >= 0.5 ? '🟡' : pct > 0 ? '🔴' : '⚪';
     const metaR = nlz(metaPerSeller[s.can]?.receita);
     const metaS = nlz(metaPerSeller[s.can]?.skin);
     const metaSvc = nlz(metaPerSeller[s.can]?.servicos);
+    const metaBM = nlz(metaPerSeller[s.can]?.boletoMedio) || metaBoletoLoja;
     return {
-      name: aliasOf(s.can), medal, can: s.can,
-      lines: [
-        { label: 'Receita', value: fmtBRL(s.ps.receita), meta: metaR ? fmtBRL(metaR) : '', dot: dot(s.pctR) },
-        { label: 'Skin', value: fmtBRL(s.ps.skin), meta: metaS ? fmtBRL(metaS) : '', dot: dot(s.pctS) },
-        { label: 'Boleto Médio', value: fmtBRL(s.ps.boletoMedio), meta: metaBoletoLoja ? fmtBRL(metaBoletoLoja) : '', dot: dot(metaBoletoLoja ? s.ps.boletoMedio/metaBoletoLoja : 0) },
-        { label: 'Itens/Boleto', value: s.ps.itensBoleto.toFixed(2).replace('.',','), meta: metaItens ? metaItens.toFixed(1).replace('.',',') : '', dot: dot(metaItens ? s.ps.itensBoleto/metaItens : 0) },
-        { label: 'PRM', value: s.ps.prm.toFixed(2).replace('.',',')+'%', meta: metaPRM ? metaPRM+'%' : '', dot: dot(metaPRM ? s.ps.prm/metaPRM : 0) },
-        { label: 'Turbinado', value: s.ps.turbinado.toFixed(2).replace('.',',')+'%', meta: metaTurb ? metaTurb+'%' : '', dot: dot(metaTurb ? s.ps.turbinado/metaTurb : 0) },
-        { label: 'ID Cliente', value: s.ps.idCliente.toFixed(2).replace('.',',')+'%', meta: metaID ? metaID+'%' : '', dot: dot(metaID ? s.ps.idCliente/metaID : 0) },
-        { label: 'Resgate', value: s.ps.resgate.toFixed(2).replace('.',',')+'%', meta: metaResgate ? metaResgate+'%' : '', dot: dot(metaResgate ? s.ps.resgate/metaResgate : 0) },
-        { label: 'BBX', value: s.ps.bbx.toFixed(2).replace('.',',')+'%', meta: metaBBX ? metaBBX+'%' : '', dot: dot(metaBBX ? s.ps.bbx/metaBBX : 0) },
-        { label: 'Serviços', value: fmtInt(s.ps.servicos), meta: metaSvc ? String(Math.round(metaSvc)) : '', dot: dot(metaSvc ? s.ps.servicos/metaSvc : 0) },
-      ],
+      name: aliasOf(s.can), can: s.can,
+      ps: s.ps, metaR, metaS, metaSvc, metaBM,
+      pctR: s.pctR, pctS: s.pctS,
+      metaPRM, metaTurb, metaID, metaResgate, metaBBX, metaItens,
+      diasRestantes, fmtDate,
     };
   });
   window._slackStoreName = sName ? `${sName} – ${selectedPdv}` : `Loja ${selectedPdv}`;
@@ -4076,37 +4074,74 @@ document.addEventListener('DOMContentLoaded', () => {
   bindCardGlow();
   bindButtonRipple();
 
-  // Slack DM button
-  const slackBtn = $('slackSendBtn');
-  if (slackBtn) slackBtn.addEventListener('click', async () => {
-    const data = window._slackSellerData;
-    if (!data || !data.length) { toast('Nenhuma consultora no dashboard.'); return; }
-    const storeName = window._slackStoreName || 'Loja';
-    slackBtn.disabled = true;
-    slackBtn.textContent = 'Enviando...';
-    let sent = 0;
-    const TEST_CHANNEL = 'U0895CZ8HU7';
-    for (const s of data) {
-      let msg = `📊 *Resultado Diário — ${storeName}*\n\n`;
-      msg += `*${s.name}* ${s.medal}\n`;
-      for (const l of s.lines) {
-        msg += `${l.label}: \`${l.value}\``;
-        if (l.meta) msg += ` · Meta: ${l.meta}`;
-        msg += ` ${l.dot}\n`;
-      }
-      try {
-        const r = await fetch('/api/slack/dm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channel: TEST_CHANNEL, text: msg }),
-        });
-        if (r.ok) sent++;
-        else { const j = await r.json(); console.warn('Slack error:', j); }
-      } catch (e) { console.warn('Slack send error:', e); }
+  // Slack DM per-seller buttons
+  function buildSlackMsg(s) {
+    const store = window._slackStoreName || 'Loja';
+    const dot = (pct) => pct >= 1 ? ':large_green_circle:' : pct >= 0.5 ? ':large_yellow_circle:' : ':red_circle:';
+    const fmtR = (v) => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+    const fmtPct = (v) => v.toFixed(2).replace('.', ',') + '%';
+    const falta = (meta, atual) => Math.max(0, meta - atual);
+
+    const faltaReceita = falta(s.metaR, s.ps.receita);
+    const faltaSkin = falta(s.metaS, s.ps.skin);
+    const metaDiaria = s.diasRestantes > 0 ? faltaReceita / s.diasRestantes : 0;
+
+    let msg = `:memo: RESULTADO ATÉ O DIA – [${s.fmtDate}]\n`;
+    msg += `Loja: ${store}\n`;
+    msg += `Consultora: *${s.name}*\n\n`;
+
+    if (s.metaR) {
+      msg += `:bar_chart: FALTANDO PARA A META – RECEITA\n`;
+      msg += ` • ${fmtR(faltaReceita)}\n`;
+      msg += ` • Meta diária: ${fmtR(metaDiaria)}\n\n`;
     }
-    slackBtn.disabled = false;
-    slackBtn.textContent = 'Enviar para Slack';
-    toast(`${sent}/${data.length} mensagens enviadas!`);
+
+    if (s.metaS) {
+      msg += `:woman-getting-massage: FALTANDO PARA A META – SKIN\n`;
+      msg += ` • ${fmtR(faltaSkin)}\n\n`;
+    }
+
+    msg += `:rocket: AVANÇO DOS INDICADORES\n\n`;
+
+    if (s.metaBM) msg += `:receipt: Boleto Médio (Meta: ${fmtR(s.metaBM)})\n • ${fmtR(s.ps.boletoMedio)} ${dot(s.metaBM ? s.ps.boletoMedio/s.metaBM : 0)}\n\n`;
+    if (s.metaPRM) msg += `:repeat: PRM (Meta: ${s.metaPRM}%)\n • ${fmtPct(s.ps.prm)} ${dot(s.ps.prm/s.metaPRM)}\n\n`;
+    if (s.metaTurb) msg += `:sparkles: Turbinado (Meta: ${s.metaTurb}%)\n • ${fmtPct(s.ps.turbinado)} ${dot(s.ps.turbinado/s.metaTurb)}\n\n`;
+    if (s.metaSvc) msg += `:woman-getting-haircut: Serviços (Meta: ${Math.round(s.metaSvc)})\n • ${Math.round(s.ps.servicos)} ${dot(s.ps.servicos/s.metaSvc)}\n\n`;
+    if (s.metaID) msg += `:iphone: ID Cliente (Meta: ${s.metaID}%)\n • ${fmtPct(s.ps.idCliente)} ${dot(s.ps.idCliente/s.metaID)}\n\n`;
+    if (s.metaResgate) msg += `:anchor: Resgate (Meta: ${s.metaResgate}%)\n • ${fmtPct(s.ps.resgate)} ${dot(s.ps.resgate/s.metaResgate)}\n\n`;
+    if (s.metaBBX) msg += `:game_die: Desafio BBX (Meta: ${s.metaBBX}%)\n • ${fmtPct(s.ps.bbx)} ${dot(s.ps.bbx/s.metaBBX)}\n\n`;
+    if (s.metaS) msg += `:skin-tone-3: Skin (Meta: ${fmtR(s.metaS)})\n • ${fmtR(s.ps.skin)} ${dot(s.pctS)}\n\n`;
+    if (s.metaItens) msg += `:package: Itens/Boleto (Meta: ${s.metaItens.toFixed(1).replace('.',',')})\n • ${s.ps.itensBoleto.toFixed(2).replace('.',',')} ${dot(s.ps.itensBoleto/s.metaItens)}\n\n`;
+
+    msg += `_Gerado por Resultado Diário · Canal Loja_`;
+    return msg;
+  }
+
+  // TODO: replace with real Slack IDs per seller
+  const SLACK_IDS = { _default: 'U0895CZ8HU7' };
+
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.slack-seller-btn');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.sellerIdx, 10);
+    const data = window._slackSellerData;
+    if (!data || !data[idx]) { toast('Dados não disponíveis.'); return; }
+    const s = data[idx];
+    const channel = SLACK_IDS[s.can] || SLACK_IDS._default;
+    const msg = buildSlackMsg(s);
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+    try {
+      const r = await fetch('/api/slack/dm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, text: msg }),
+      });
+      if (r.ok) toast(`Enviado para ${s.name}!`);
+      else toast('Erro ao enviar.');
+    } catch (e) { toast('Erro: ' + e.message); }
+    btn.disabled = false;
+    btn.textContent = 'Enviar Slack';
   });
 
   // Carrega metas globais do servidor

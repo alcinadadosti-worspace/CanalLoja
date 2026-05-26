@@ -295,15 +295,18 @@ app.post('/api/slack/send', requireApi, async (req, res) => {
 app.post('/api/slack/dm', requireApi, async (req, res) => {
   const token = process.env.SLACK_BOT_TOKEN;
   if (!token) return res.status(501).json({ error: 'slack_bot_not_configured' });
-  const { channel, text } = req.body || {};
+  const { channel, text, blocks } = req.body || {};
   if (!channel || typeof channel !== 'string') return res.status(400).json({ error: 'missing_channel' });
-  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'missing_text' });
-  if (text.length > 20000) return res.status(400).json({ error: 'text_too_long' });
+  if (!text && !blocks) return res.status(400).json({ error: 'missing_text_or_blocks' });
   try {
+    const payload = { channel };
+    if (text) payload.text = text;
+    if (blocks) payload.blocks = blocks;
+    payload.mrkdwn = true;
     const r = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel, text, mrkdwn: true }),
+      body: JSON.stringify(payload),
     });
     const j = await r.json();
     if (!j.ok) return res.status(502).json({ error: 'slack_error', detail: j.error });
