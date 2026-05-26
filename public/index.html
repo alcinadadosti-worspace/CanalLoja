@@ -3225,6 +3225,33 @@ function renderDashboard() {
     if (metaBBX) { score += Math.min(2, ps.bbx / metaBBX); count++; }
     return { can, score: count ? score / count : 0, ps, metaR, metaS, pctR, pctS };
   });
+  // IAF scoring: weighted points per indicator (total 270 pts)
+  const IAF_WEIGHTS = { receita: 100, nps: 35, resgate: 25, skin: 25, idCliente: 25, servicos: 35, auditoria: 25 };
+  const IAF_TIERS = [
+    { min: 0.95, label: 'Diamante', emoji: '💎' },
+    { min: 0.85, label: 'Esmeralda', emoji: '💚' },
+    { min: 0.75, label: 'Rubi', emoji: '❤️‍🔥' },
+    { min: 0.65, label: 'Platina', emoji: '⚪' },
+    { min: 0.55, label: 'Ouro', emoji: '🥇' },
+    { min: 0.40, label: 'Prata', emoji: '🥈' },
+    { min: 0, label: 'Bronze', emoji: '🥉' },
+  ];
+
+  for (const s of sellerScores) {
+    const ps = s.ps;
+    const metaSvc = nlz(metaPerSeller[s.can]?.servicos);
+    let iafPts = 0, iafMax = 0;
+    if (s.metaR) { iafPts += Math.min(1, ps.receita / s.metaR) * IAF_WEIGHTS.receita; iafMax += IAF_WEIGHTS.receita; }
+    if (metaResgate) { iafPts += Math.min(1, ps.resgate / metaResgate) * IAF_WEIGHTS.resgate; iafMax += IAF_WEIGHTS.resgate; }
+    if (s.metaS) { iafPts += Math.min(1, ps.skin / s.metaS) * IAF_WEIGHTS.skin; iafMax += IAF_WEIGHTS.skin; }
+    if (metaID) { iafPts += Math.min(1, ps.idCliente / metaID) * IAF_WEIGHTS.idCliente; iafMax += IAF_WEIGHTS.idCliente; }
+    if (metaSvc) { iafPts += Math.min(1, ps.servicos / metaSvc) * IAF_WEIGHTS.servicos; iafMax += IAF_WEIGHTS.servicos; }
+    s.iafPct = iafMax > 0 ? iafPts / iafMax : 0;
+    s.iafPts = iafPts;
+    s.iafMax = iafMax;
+    s.iafTier = IAF_TIERS.find(t => s.iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
+  }
+
   sellerScores.sort((a,b) => b.score - a.score);
   const medals = ['🥇', '🥈', '🥉'];
 
@@ -3244,9 +3271,10 @@ function renderDashboard() {
         <div>${dot}</div>
       </div>`;
     };
+    const tierBadge = `<span style="font-size:10px; padding:2px 8px; border-radius:10px; background:rgba(231,196,108,0.12); color:var(--accent); font-family:'JetBrains Mono',monospace; letter-spacing:0.05em; margin-left:6px;">${s.iafTier.emoji} ${s.iafTier.label} · ${Math.round(s.iafPct*100)}%</span>`;
     return `<div class="dash-seller">
-      <div class="dash-seller-name" style="display:flex; align-items:center; justify-content:space-between;">
-        <span>${aliasOf(s.can)} <span class="dash-seller-medal">${medal}</span></span>
+      <div class="dash-seller-name" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+        <span>${aliasOf(s.can)} <span class="dash-seller-medal">${medal}</span> ${tierBadge}</span>
         <button class="secondary slack-seller-btn" data-seller-idx="${idx}" style="font-size:10px; padding:4px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace;">Enviar Slack</button>
       </div>
       ${row('Receita', fmtBRL(s.ps.receita), s.pctR)}
@@ -3284,6 +3312,7 @@ function renderDashboard() {
     const metaBM = nlz(metaPerSeller[s.can]?.boletoMedio) || metaBoletoLoja;
     return {
       name: aliasOf(s.can), can: s.can,
+      iafTier: s.iafTier, iafPct: s.iafPct,
       ps: s.ps, metaR, metaS, metaSvc, metaBM,
       pctR: s.pctR, pctS: s.pctS,
       metaPRM, metaTurb, metaID, metaResgate, metaBBX, metaItens,
@@ -4087,9 +4116,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const faltaSkin = falta(s.metaS, s.ps.skin);
     const metaDiaria = s.diasRestantes > 0 ? faltaReceita / s.diasRestantes : 0;
 
+    const TIER_SLACK = { 'Diamante':':gem:','Esmeralda':':green_heart:','Rubi':':heart_on_fire:','Platina':':white_circle:','Ouro':':first_place_medal:','Prata':':second_place_medal:','Bronze':':third_place_medal:' };
+
     let msg = `:memo: RESULTADO ATÉ O DIA – [${s.fmtDate}]\n`;
     msg += `Loja: ${store}\n`;
-    msg += `Consultora: *${s.name}*\n\n`;
+    msg += `Consultora: *${s.name}*\n`;
+    if (s.iafTier) msg += `${TIER_SLACK[s.iafTier.label] || ''} Segmento: *${s.iafTier.label}* (${Math.round(s.iafPct*100)}% IAF)\n`;
+    msg += `\n`;
 
     if (s.metaR) {
       msg += `:bar_chart: FALTANDO PARA A META – RECEITA\n`;
