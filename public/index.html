@@ -1984,26 +1984,38 @@ function detectStoresAndSellers() {
     return;
   }
 
-  // From Resumo CONSULTOR sheet (most reliable: only active consultores with data this period)
-  const rows = getSheet('resumo', 'Consultor');
-  if (!rows) return;
-  for (const r of rows.slice(2)) {  // skip header rows
-    const name = r[0];
-    const pdv = String(r[1]||'').trim();
-    if (!name || !pdv || !/^\d{4,6}$/.test(pdv)) continue;
-    const nname = normName(name);
-    if (!nname || nname === 'TOTAL') continue;
-    if (/^\d{4,6}/.test(String(name).trim())) continue;
+  // From Consultor sheet — try resumo first, then fallbacks
+  const rows = getSheet('resumo', 'Consultor')
+    || getSheet('bbx', 'Consultor')
+    || getSheet('cuidadosFaciais', 'Consultor')
+    || getSheet('servicosRealizados', 'Consultor');
 
-    // Cross-store seller logic: only show in primaryPdv
-    const crossInfo = CROSS_STORE_SELLERS[nname];
-    if (crossInfo && pdv !== crossInfo.primaryPdv) {
-      continue;  // skip — this seller is shown in primaryPdv only
+  // Parse Consultor rows from spreadsheet
+  if (rows) {
+    for (const r of rows.slice(2)) {
+      const name = r[0];
+      const pdv = String(r[1]||'').trim();
+      if (!name || !pdv || !/^\d{4,6}$/.test(pdv)) continue;
+      const nname = normName(name);
+      if (!nname || nname === 'TOTAL') continue;
+      if (/^\d{4,6}/.test(String(name).trim())) continue;
+      const crossInfo = CROSS_STORE_SELLERS[nname];
+      if (crossInfo && pdv !== crossInfo.primaryPdv) continue;
+      if (!storesCatalog[pdv]) storesCatalog[pdv] = { sellers: new Map() };
+      if (!storesCatalog[pdv].sellers.has(nname)) {
+        storesCatalog[pdv].sellers.set(nname, prettyName(name));
+      }
     }
+  }
 
-    if (!storesCatalog[pdv]) storesCatalog[pdv] = { sellers: new Map() };
-    if (!storesCatalog[pdv].sellers.has(nname)) {
-      storesCatalog[pdv].sellers.set(nname, prettyName(name));
+  // Fallback: if no stores found from spreadsheets, build from server seller metas
+  if (!Object.keys(storesCatalog).length && window._serverSellerMetas) {
+    for (const [name, data] of Object.entries(window._serverSellerMetas)) {
+      if (!data.pdv || !/^\d{4,6}$/.test(data.pdv)) continue;
+      const pdv = data.pdv;
+      if (!storesCatalog[pdv]) storesCatalog[pdv] = { sellers: new Map() };
+      const can = name.toUpperCase();
+      if (!storesCatalog[pdv].sellers.has(can)) storesCatalog[pdv].sellers.set(can, name);
     }
   }
 
@@ -3989,9 +4001,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   applyLoadedState(loadState());
   applySeeds();  // pre-populate any missing metas with seed values
-  applyRoleFiltering();  // esconde/restringe UI conforme o papel da usuária
-  updateUploadAreaUI();  // mostra dropzone só se admin, senão mostra hint
-  loadFilesFromServer();  // baixa planilhas que o admin já subiu
+  applyRoleFiltering();
+  updateUploadAreaUI();
   bindDashTabs();
   bindCardGlow();
   bindButtonRipple();
@@ -4028,6 +4039,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch('/api/seller-metas');
       if (!r.ok) return;
       serverSellerMetas = await r.json();
+      window._serverSellerMetas = serverSellerMetas;
     } catch {}
   }
 
@@ -4055,8 +4067,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  loadServerStoreMetas();
-  loadServerSellerMetas();
+  // Carrega seller metas ANTES das planilhas — necessario para fallback em detectStoresAndSellers
+  loadServerSellerMetas().then(() => {
+    loadServerStoreMetas();
+    loadFilesFromServer();
+  });
   window._applyServerStoreMetas = function(pdv) { applyServerStoreMetas(pdv); applyServerSellerMetas(pdv); };
 
   // Dashboard store selector — syncs with hidden storeSelect
