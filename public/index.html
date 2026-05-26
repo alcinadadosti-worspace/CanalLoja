@@ -2010,12 +2010,39 @@ function detectStoresAndSellers() {
 
   // Fallback: if no stores found from spreadsheets, build from server seller metas
   if (!Object.keys(storesCatalog).length && window._serverSellerMetas) {
+    // Collect all full names from available CONSULTOR sheets
+    const allFullNames = [];
+    const nameSources = [
+      getSheet('cuidadosFaciais', 'CONSULTOR'),
+      getSheet('servicosRealizados', 'CONSULTOR'),
+      getSheet('bbx', 'Consultor'),
+    ];
+    const seen = new Set();
+    for (const rows of nameSources) {
+      if (!rows) continue;
+      for (const r of rows) {
+        for (let c = 0; c <= 1; c++) {
+          const raw = String(r[c] || '').trim();
+          if (!raw || /^\d/.test(raw) || /^(CONSULTOR|PDV|VARIAVEL|TOTAL|RECEITA)$/i.test(raw)) continue;
+          const norm = normName(raw);
+          if (norm.length >= 3 && !seen.has(norm)) {
+            seen.add(norm);
+            allFullNames.push({ norm, display: prettyName(raw) });
+          }
+        }
+      }
+    }
+
     for (const [name, data] of Object.entries(window._serverSellerMetas)) {
       if (!data.pdv || !/^\d{4,6}$/.test(data.pdv)) continue;
       const pdv = data.pdv;
       if (!storesCatalog[pdv]) storesCatalog[pdv] = { sellers: new Map() };
-      const can = name.toUpperCase();
-      if (!storesCatalog[pdv].sellers.has(can)) storesCatalog[pdv].sellers.set(can, name);
+      const shortNorm = normName(name);
+      const match = allFullNames.find(n => n.norm.startsWith(shortNorm + ' ') || n.norm === shortNorm)
+        || allFullNames.find(n => n.norm.startsWith(shortNorm.split(/\s+/)[0] + ' '));
+      const can = match ? match.norm : shortNorm;
+      const display = match ? match.display : prettyName(name);
+      if (!storesCatalog[pdv].sellers.has(can)) storesCatalog[pdv].sellers.set(can, display);
     }
   }
 
@@ -2501,18 +2528,30 @@ function extractAll(pdv, sellers) {
 
     // Skin sum from cuidadosFaciais file
     if (skinConsRows) {
-      for (const p of pdvsToAgg) {
-        const r = skinConsRows.find(r => normName(r[0]) === can && String(r[1]||'').trim() === p);
-        if (r) skin += nlz(r[3]);
+      if (consRows) {
+        for (const p of pdvsToAgg) {
+          const r = skinConsRows.find(r => normName(r[0]) === can && String(r[1]||'').trim() === p);
+          if (r) skin += nlz(r[3]);
+        }
+      } else {
+        for (const r of skinConsRows) {
+          if (normName(r[0]) === can) skin += nlz(r[3]);
+        }
       }
     }
 
     // Servicos sum
     if (servRows) {
-      for (const r of servRows.slice(1)) {
-        const rowPdv = String(r[0]||'').trim();
-        if (!pdvsToAgg.includes(rowPdv)) continue;
-        if (normName(r[1]) === can) servicos += nlz(r[5]);
+      if (consRows) {
+        for (const r of servRows.slice(1)) {
+          const rowPdv = String(r[0]||'').trim();
+          if (!pdvsToAgg.includes(rowPdv)) continue;
+          if (normName(r[1]) === can) servicos += nlz(r[5]);
+        }
+      } else {
+        for (const r of servRows.slice(1)) {
+          if (normName(r[1]) === can) servicos += nlz(r[5]);
+        }
       }
     }
 
