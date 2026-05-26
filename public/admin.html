@@ -640,6 +640,11 @@ function renderSlackSellerList() {
 $('slackStoreSelect').addEventListener('change', renderSlackSellerList);
 
 let adminResumoData = {};
+let adminConsultorData = {};
+
+function normNameAdmin(s) {
+  return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+}
 
 async function loadAdminResumo() {
   try {
@@ -647,19 +652,47 @@ async function loadAdminResumo() {
     if (!r.ok) return;
     const buf = await r.arrayBuffer();
     const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+
     const pdvSheet = wb.SheetNames.find(s => s === 'PDV');
-    if (!pdvSheet) return;
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[pdvSheet], { header: 1, defval: '' });
-    for (const r of rows) {
-      const pdv = String(r[0] || '').trim();
-      if (/^\d{4,6}$/.test(pdv)) {
-        const rec = typeof r[1] === 'number' ? r[1] : 0;
-        const bol = typeof r[4] === 'number' ? r[4] : 0;
-        const bm = typeof r[7] === 'number' ? r[7] : 0;
-        adminResumoData[pdv] = { receita: rec, boletos: bol, boletoMedio: bm };
+    if (pdvSheet) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[pdvSheet], { header: 1, defval: '' });
+      for (const r of rows) {
+        const pdv = String(r[0] || '').trim();
+        if (/^\d{4,6}$/.test(pdv)) {
+          adminResumoData[pdv] = { receita: typeof r[1]==='number'?r[1]:0, boletos: typeof r[4]==='number'?r[4]:0, boletoMedio: typeof r[7]==='number'?r[7]:0 };
+        }
       }
     }
-  } catch {}
+
+    const csName = wb.SheetNames.find(s => s.toUpperCase() === 'CONSULTOR');
+    if (csName) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[csName], { header: 1, defval: '' });
+      const nlz = (v) => { if (v==null||v===''||v==='-') return 0; const n=typeof v==='number'?v:parseFloat(String(v).replace(',','.')); return isNaN(n)?0:n; };
+      for (const r of rows.slice(2)) {
+        const name = normNameAdmin(r[0]);
+        const pdv = String(r[1]||'').trim();
+        if (!name || !pdv || !/^\d{4,6}$/.test(pdv) || name==='TOTAL') continue;
+        const key = name + '_' + pdv;
+        adminConsultorData[key] = {
+          name, pdv,
+          receita: nlz(r[2]), boletos: nlz(r[4]), boletoMedio: nlz(r[6]),
+          itensBoleto: nlz(r[10]), turbinado: nlz(r[14])*100,
+          resgate: nlz(r[26])*100, skin: nlz(r[30])*100, idCliente: nlz(r[32]),
+        };
+      }
+    }
+  } catch (e) { console.warn('loadAdminResumo:', e); }
+}
+
+function findConsultorActual(sellerName, pdv) {
+  const shortNorm = normNameAdmin(sellerName);
+  for (const [, data] of Object.entries(adminConsultorData)) {
+    if (data.pdv === pdv && data.name.startsWith(shortNorm + ' ') || data.name === shortNorm) return data;
+  }
+  for (const [, data] of Object.entries(adminConsultorData)) {
+    if (data.pdv === pdv && data.name.startsWith(shortNorm.split(/\s+/)[0] + ' ')) return data;
+  }
+  return null;
 }
 
 function buildAdminSlackMsg(name, metas, pdv) {
@@ -674,28 +707,20 @@ function buildAdminSlackMsg(name, metas, pdv) {
   for (let d = new Date(today); d <= endOfMonth; d.setDate(d.getDate() + 1)) { if (d.getDay() !== 0) diasUteis++; }
   if (diasUteis < 1) diasUteis = 1;
 
+  const actual = findConsultorActual(name, pdv) || {};
+  const aRec = actual.receita || 0;
+  const aSkin = actual.skin || 0;
+  const aBM = actual.boletoMedio || 0;
+  const aItens = actual.itensBoleto || 0;
+  const aTurb = actual.turbinado || 0;
+  const aResgate = actual.resgate || 0;
+  const aID = actual.idCliente || 0;
+
   const metaReceita = metas.receita || 0;
   const metaSkin = metas.skin || 0;
-  const faltaReceita = Math.max(0, metaReceita);
-  const faltaSkin = Math.max(0, metaSkin);
+  const faltaReceita = Math.max(0, metaReceita - aRec);
+  const faltaSkin = Math.max(0, metaSkin - aSkin);
   const metaDiaria = diasUteis > 0 ? Math.round(faltaReceita / diasUteis) : 0;
-
-  let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
-  msg += `Loja: ${store} – ${pdv}\n`;
-  msg += `Consultora: *${name}*\n\n`;
-
-  if (metaReceita) {
-    msg += `:bar_chart: FALTANDO PARA A META – RECEITA\n`;
-    msg += ` • ${fmtR(faltaReceita)}\n`;
-    msg += ` • Meta diaria: ${fmtR(metaDiaria)}\n\n`;
-  }
-
-  if (metaSkin) {
-    msg += `:woman-getting-massage: FALTANDO PARA A META – SKIN\n`;
-    msg += ` • ${fmtR(faltaSkin)}\n\n`;
-  }
-
-  msg += `:rocket: AVANCO DOS INDICADORES\n\n`;
 
   const metaBM = metas.boletoMedio || 0;
   const metaPRM = parseFloat(globalMetas.metaPRM) || 0;
@@ -708,17 +733,37 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const metaItens = parseFloat(globalMetas.metaItensBoleto) || 0;
   const metaAudit = parseFloat(globalMetas.metaAuditoria) || 0;
 
-  if (metaBM) msg += `:receipt: Boleto Medio (Meta: ${fmtR(metaBM)})\n • R$ 0,00 :red_circle:\n\n`;
-  if (metaPRM) msg += `:repeat: PRM (Meta: ${metaPRM}%)\n • 0,00% :red_circle:\n\n`;
-  if (metaTurb) msg += `:sparkles: Turbinado (Meta: ${metaTurb}%)\n • 0,00% :red_circle:\n\n`;
-  if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • 0 :red_circle:\n\n`;
-  if (metaID) msg += `:iphone: ID Cliente (Meta: ${metaID}%)\n • 0,00% :red_circle:\n\n`;
-  if (metaNPS) msg += `:mag_right: NPS (Meta: ${metaNPS}%)\n • 0,00% :red_circle:\n\n`;
-  if (metaResgate) msg += `:anchor: Resgate (Meta: ${metaResgate}%)\n • 0,00% :red_circle:\n\n`;
-  if (metaBBX) msg += `:game_die: Desafio BBX (Meta: ${metaBBX}%)\n • 0,00% :red_circle:\n\n`;
-  if (metaItens) msg += `:package: Itens/Boleto (Meta: ${metaItens})\n • 0,00 :red_circle:\n\n`;
-  if (metaSkin) msg += `:skin-tone-3: Skin (Meta: ${fmtR(metaSkin)})\n • R$ 0,00 :red_circle:\n\n`;
-  if (metaAudit) msg += `:clipboard: Auditoria (Meta: ${metaAudit}%)\n • 0,00% :red_circle:\n\n`;
+  let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
+  msg += `Loja: ${store} – ${pdv}\n`;
+  msg += `Consultora: *${name}*\n\n`;
+
+  if (metaReceita) {
+    msg += `:bar_chart: FALTANDO PARA A META – RECEITA\n`;
+    msg += ` • ${fmtR(faltaReceita)}`;
+    if (aRec > 0) msg += ` _(realizado: ${fmtR(aRec)})_`;
+    msg += `\n • Meta diaria: ${fmtR(metaDiaria)}\n\n`;
+  }
+
+  if (metaSkin) {
+    msg += `:woman-getting-massage: FALTANDO PARA A META – SKIN\n`;
+    msg += ` • ${fmtR(faltaSkin)}`;
+    if (aSkin > 0) msg += ` _(realizado: ${fmtR(aSkin)})_`;
+    msg += `\n\n`;
+  }
+
+  msg += `:rocket: AVANCO DOS INDICADORES\n\n`;
+
+  if (metaBM) msg += `:receipt: Boleto Medio (Meta: ${fmtR(metaBM)})\n • ${fmtR(aBM)} ${dot(aBM, metaBM)}\n\n`;
+  if (metaPRM) msg += `:repeat: PRM (Meta: ${metaPRM}%)\n • ${fmtPct(0)} ${dot(0, metaPRM)}\n\n`;
+  if (metaTurb) msg += `:sparkles: Turbinado (Meta: ${metaTurb}%)\n • ${fmtPct(aTurb)} ${dot(aTurb, metaTurb)}\n\n`;
+  if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • 0 ${dot(0, metaSvc)}\n\n`;
+  if (metaID) msg += `:iphone: ID Cliente (Meta: ${metaID}%)\n • ${fmtPct(aID)} ${dot(aID, metaID)}\n\n`;
+  if (metaNPS) msg += `:mag_right: NPS (Meta: ${metaNPS}%)\n • 0,00% ${dot(0, metaNPS)}\n\n`;
+  if (metaResgate) msg += `:anchor: Resgate (Meta: ${metaResgate}%)\n • ${fmtPct(aResgate)} ${dot(aResgate, metaResgate)}\n\n`;
+  if (metaBBX) msg += `:game_die: Desafio BBX (Meta: ${metaBBX}%)\n • 0,00% ${dot(0, metaBBX)}\n\n`;
+  if (metaItens) msg += `:package: Itens/Boleto (Meta: ${metaItens})\n • ${aItens.toFixed(2).replace('.',',')} ${dot(aItens, metaItens)}\n\n`;
+  if (metaSkin) msg += `:skin-tone-3: Skin (Meta: ${fmtR(metaSkin)})\n • ${fmtR(aSkin)} ${dot(aSkin, metaSkin)}\n\n`;
+  if (metaAudit) msg += `:clipboard: Auditoria (Meta: ${metaAudit}%)\n • 0,00% ${dot(0, metaAudit)}\n\n`;
 
   msg += `_Gerado por Resultado Diario · Canal Loja_`;
   return msg;
