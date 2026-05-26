@@ -3290,7 +3290,8 @@ function renderDashboard() {
       diasRestantes, fmtDate,
     };
   });
-  window._slackStoreName = sName ? `${sName} – ${selectedPdv}` : `Loja ${selectedPdv}`;
+  const _sn = STORE_NAMES[selectedPdv];
+  window._slackStoreName = _sn ? `${_sn} – ${selectedPdv}` : `Loja ${selectedPdv}`;
 
   // Render também as outras abas (com try-catch pra não quebrar a aba "Loja" se algo falhar)
   try { renderHubTab(); } catch(e) { console.error('Hub tab error:', e); }
