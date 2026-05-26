@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin · Resultado Diário</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -298,6 +299,41 @@ section {
       </div>
     </section>
 
+    <!-- IMPORTAR COMISSÃO -->
+    <section>
+      <div class="section-label">04 / Importar comissao</div>
+      <div class="section-title">Planilha de comissao do ciclo</div>
+      <div class="section-desc">Arraste a planilha de comissao (.xlsx). As metas de cada consultora serao extraidas automaticamente.</div>
+
+      <div class="dropzone" id="comDropzone">
+        <div class="dropzone-icon">&#128203;</div>
+        <div class="dropzone-text">Solte a planilha de comissao aqui</div>
+        <div class="dropzone-hint">ex: COMISSAO CICLO 9.xlsx</div>
+      </div>
+      <input type="file" id="comFileInput" accept=".xlsx,.xls" style="display:none">
+
+      <div id="comPreview" style="display:none; margin-top:18px;">
+        <div class="section-label" style="color:var(--accent); margin-bottom:10px;">Preview das metas extraidas</div>
+        <div style="overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius);">
+          <table style="width:100%; border-collapse:collapse; font-size:12px;" id="comTable">
+            <thead><tr style="background:var(--bg-3);">
+              <th style="padding:8px 10px; text-align:left; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em;">NOME</th>
+              <th style="padding:8px 10px; text-align:left; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">LOJA</th>
+              <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">RECEITA</th>
+              <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">BM</th>
+              <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">SKIN</th>
+              <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">SVC</th>
+            </tr></thead>
+            <tbody id="comTableBody"></tbody>
+          </table>
+        </div>
+        <div class="btn-row">
+          <button id="comConfirmBtn">Confirmar e salvar metas</button>
+          <button class="btn-secondary" id="comCancelBtn">Cancelar</button>
+        </div>
+      </div>
+    </section>
+
   </div>
 </div>
 
@@ -527,6 +563,155 @@ $('resetMetas').addEventListener('click', () => {
   }
   toast('Metas resetadas para o padrao. Clique em Salvar para confirmar.');
 });
+
+// ---------- Import Comissao ----------
+const STORE_OPTIONS = {
+  '24303': 'Sao Sebastiao', '24617': 'Sustentavel', '24668': 'Palmeira',
+  '24669': 'Penedo', '24670': 'Teotonio', '24671': 'Coruripe',
+  'digital': 'Digital', 'gerente_norte': 'Gerente Norte', 'gerente_sul': 'Gerente Sul', 'gerente_digital': 'Gerente Digital',
+};
+const COM_VAR_MAP = {
+  'RECEITA':'receita','BOLETO MÉDIO':'boletoMedio','BOLETO MEDIO':'boletoMedio',
+  'CRESCIMENTO DE BOLETO MÉDIO':'boletoMedio','SKIN':'skin','CATEGORIA (SKIN)':'skin',
+  'SERVIÇOS':'servicos','SERVICOS':'servicos','QUANTIDADE DE SERVIÇOS':'servicos',
+  'ITENS/BOLETO':'itensBoleto','ITENS POR BOLETO':'itensBoleto',
+  'AUDITORIA':'auditoria','NPS':'nps','PRM':'prm','TURBINADO':'turbinado',
+  'RESGATE':'resgate','ID CLIENTE':'idCliente','ID  CLIENTE':'idCliente',
+  'ID DO CLIENTE':'idCliente','CONVERSÃO':'conversao','CONVERSAO':'conversao',
+  'RECEITA CABELOS':'receitaCabelos','RECEITA SKIN':'receitaSkin','RECEITA MAKE':'receitaMake',
+  'CALÇADA PERFUMADA':'calcadaPerfumada',
+};
+
+let comParsedData = {};
+
+function parseComSheet(wb, sheetName, nc, vc, mc) {
+  const ws = wb.Sheets[sheetName];
+  if (!ws) return {};
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const res = {};
+  let cur = null;
+  for (const row of data) {
+    const c1 = String(row[nc]||'').trim(), c2 = String(row[vc]||'').trim(), c3 = row[mc];
+    if (c2 === 'PREENCHIMENTO' && c1) { cur = c1.toUpperCase(); if (!res[cur]) res[cur] = {}; continue; }
+    if (c1 === 'VARIÁVEL') continue;
+    if (cur && c1 && !c1.startsWith('Saldo')) {
+      const k = COM_VAR_MAP[c1.toUpperCase().trim()];
+      if (k && c3 !== '' && c3 != null) { const v = typeof c3==='number'?c3:parseFloat(String(c3).replace(',','.')); if (!isNaN(v)) res[cur][k] = v; }
+    }
+    if (c1 && c1.startsWith('Saldo')) cur = null;
+  }
+  return res;
+}
+
+async function handleComFile(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const all = {};
+  const sheets = [
+    ['Gerente de unidade loja',1,2,2], ['Gerente de canal Loja',1,2,2],
+    ['Consultor de loja',1,2,2], ['Consultora de serviços',0,1,1], ['Consultor Loja digital',0,1,1],
+  ];
+  for (const [name,nc,vc,mc] of sheets) {
+    for (const [n,m] of Object.entries(parseComSheet(wb,name,nc,vc,mc))) {
+      if (!all[n]) all[n] = {};
+      Object.assign(all[n], m);
+    }
+  }
+  // Merge JÚNIOR → JOSENILDO
+  if (all['JÚNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JÚNIOR']}; delete all['JÚNIOR']; }
+  if (all['JUNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JUNIOR']}; delete all['JUNIOR']; }
+
+  comParsedData = all;
+  renderComPreview();
+}
+
+function renderComPreview() {
+  const body = $('comTableBody');
+  body.innerHTML = '';
+  const names = Object.keys(comParsedData).sort();
+  const opts = Object.entries(STORE_OPTIONS).map(([v,l]) => `<option value="${v}">${l} (${v})</option>`).join('');
+  for (const name of names) {
+    const m = comParsedData[name];
+    const existingPdv = allStoreMetas._sellerPdvs?.[name] || '';
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--line)';
+    const selId = 'comPdv_' + name.replace(/\s/g,'_');
+    tr.innerHTML = `
+      <td style="padding:6px 10px; font-weight:600;">${name}</td>
+      <td style="padding:6px 10px;"><select id="${selId}" style="width:100%; font-size:11px; padding:4px;">${opts}</select></td>
+      <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.receita ? Math.round(m.receita).toLocaleString('pt-BR') : '-'}</td>
+      <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.boletoMedio ? Math.round(m.boletoMedio) : '-'}</td>
+      <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.skin ? Math.round(m.skin).toLocaleString('pt-BR') : '-'}</td>
+      <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.servicos ? Math.round(m.servicos) : '-'}</td>
+    `;
+    body.appendChild(tr);
+  }
+  $('comPreview').style.display = 'block';
+  // Auto-assign PDVs from existing seller metas
+  autoAssignPdvs();
+}
+
+async function autoAssignPdvs() {
+  try {
+    const r = await fetch('/api/seller-metas');
+    if (!r.ok) return;
+    const existing = await r.json();
+    for (const name of Object.keys(comParsedData)) {
+      const selId = 'comPdv_' + name.replace(/\s/g,'_');
+      const sel = $(selId);
+      if (sel && existing[name] && existing[name].pdv) sel.value = existing[name].pdv;
+    }
+  } catch {}
+}
+
+$('comConfirmBtn').addEventListener('click', async () => {
+  const sellerMetas = {};
+  for (const [name, metas] of Object.entries(comParsedData)) {
+    const selId = 'comPdv_' + name.replace(/\s/g,'_');
+    const sel = $(selId);
+    const pdv = sel ? sel.value : '';
+    sellerMetas[name] = { ...metas, pdv };
+  }
+  try {
+    const r = await fetch('/api/seller-metas', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sellerMetas),
+    });
+    if (!r.ok) { toast('Erro ao salvar.'); return; }
+    const j = await r.json();
+    toast(`Metas de ${j.count} consultoras salvas!`);
+
+    // Auto-calculate and save store metas
+    const PDVS = ['24303','24617','24668','24669','24670','24671'];
+    for (const pdv of PDVS) {
+      const sellers = Object.entries(sellerMetas).filter(([,m]) => m.pdv === pdv);
+      if (!sellers.length) continue;
+      const rec = sellers.reduce((s,[,m]) => s + (m.receita||0), 0);
+      const sk = sellers.reduce((s,[,m]) => s + (m.skin||0), 0);
+      const bms = sellers.filter(([,m]) => m.boletoMedio).map(([,m]) => m.boletoMedio);
+      const bm = bms.length ? Math.round(bms.reduce((a,b) => a+b, 0) / bms.length) : '';
+      await fetch(`/api/store-metas/${pdv}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receitaLoja: String(Math.round(rec)), skinLoja: String(Math.round(sk)), boletoMedio: bm ? String(bm) : '', npsLoja: '90', auditoriaLoja: '95' }),
+      });
+    }
+    toast('Metas por loja recalculadas!');
+    $('comPreview').style.display = 'none';
+    loadStoreMetas();
+  } catch (e) { toast('Erro: ' + e.message); }
+});
+
+$('comCancelBtn').addEventListener('click', () => {
+  $('comPreview').style.display = 'none';
+  comParsedData = {};
+});
+
+const comDz = $('comDropzone'), comFi = $('comFileInput');
+comDz.addEventListener('click', () => comFi.click());
+comFi.addEventListener('change', e => { if (e.target.files[0]) handleComFile(e.target.files[0]); });
+comDz.addEventListener('dragover', e => { e.preventDefault(); comDz.classList.add('dragging'); });
+comDz.addEventListener('dragleave', () => comDz.classList.remove('dragging'));
+comDz.addEventListener('drop', e => { e.preventDefault(); comDz.classList.remove('dragging'); if (e.dataTransfer.files[0]) handleComFile(e.dataTransfer.files[0]); });
 
 // ---------- Store Metas ----------
 const STORE_META_FIELDS = ['smReceitaLoja', 'smBoletoMedio', 'smSkinLoja', 'smNpsLoja', 'smAuditoriaLoja'];
