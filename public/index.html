@@ -3246,7 +3246,9 @@ function renderDashboard() {
     if (s.metaS) { iafPts += Math.min(1, ps.skin / s.metaS) * IAF_WEIGHTS.skin; iafMax += IAF_WEIGHTS.skin; }
     if (metaID) { iafPts += Math.min(1, ps.idCliente / metaID) * IAF_WEIGHTS.idCliente; iafMax += IAF_WEIGHTS.idCliente; }
     if (metaSvc) { iafPts += Math.min(1, ps.servicos / metaSvc) * IAF_WEIGHTS.servicos; iafMax += IAF_WEIGHTS.servicos; }
-    s.iafPct = iafMax > 0 ? iafPts / iafMax : 0;
+    const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
+    const savedPct = nlz(window._serverSellerMetas?.[s.can]?.iafSegment);
+    s.iafPct = Math.max(calcPct, savedPct);
     s.iafPts = iafPts;
     s.iafMax = iafMax;
     s.iafTier = IAF_TIERS.find(t => s.iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];

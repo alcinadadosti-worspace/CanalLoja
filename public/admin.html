@@ -749,8 +749,10 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaResgate) { iafPts += Math.min(1, aResgate / metaResgate) * IAF_W.resgate; iafMax += IAF_W.resgate; }
   if (metaSkin) { iafPts += Math.min(1, aSkin / metaSkin) * IAF_W.skin; iafMax += IAF_W.skin; }
   if (metaID) { iafPts += Math.min(1, aID / metaID) * IAF_W.idCliente; iafMax += IAF_W.idCliente; }
-  if (metaSvc) { iafPts += Math.min(1, 0 / metaSvc) * IAF_W.servicos; iafMax += IAF_W.servicos; }
-  const iafPct = iafMax > 0 ? iafPts / iafMax : 0;
+  if (metaSvc) { iafMax += IAF_W.servicos; }
+  const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
+  const savedPct = parseFloat(allSellerMetas[name]?.iafSegment) || 0;
+  const iafPct = Math.max(calcPct, savedPct);
   const iafTier = IAF_TIERS.find(t => iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
 
   let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
@@ -920,12 +922,43 @@ async function autoAssignPdvs() {
 }
 
 $('comConfirmBtn').addEventListener('click', async () => {
+  // Auto-save IAF segments from current cycle before overwriting with new commission
+  if (Object.keys(allSellerMetas).length && Object.keys(adminConsultorData).length) {
+    const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25, servicos: 35 };
+    const iafUpdate = {};
+    for (const [name, metas] of Object.entries(allSellerMetas)) {
+      if (SKIP_NAMES.test(name) || !metas.pdv || !/^\d{4,6}$/.test(metas.pdv)) continue;
+      const actual = findConsultorActual(name, metas.pdv) || {};
+      let pts = 0, max = 0;
+      if (metas.receita) { pts += Math.min(1, (actual.receita||0) / metas.receita) * IAF_W.receita; max += IAF_W.receita; }
+      const mr = parseFloat(globalMetas.metaResgate) || 0;
+      if (mr) { pts += Math.min(1, (actual.resgate||0) / mr) * IAF_W.resgate; max += IAF_W.resgate; }
+      if (metas.skin) { pts += Math.min(1, (actual.skin||0) / metas.skin) * IAF_W.skin; max += IAF_W.skin; }
+      const mi = parseFloat(globalMetas.metaID) || 0;
+      if (mi) { pts += Math.min(1, (actual.idCliente||0) / mi) * IAF_W.idCliente; max += IAF_W.idCliente; }
+      if (metas.servicos) { max += IAF_W.servicos; }
+      const pct = max > 0 ? pts / max : 0;
+      const savedPct = parseFloat(metas.iafSegment) || 0;
+      iafUpdate[name] = { iafSegment: Math.max(pct, savedPct) };
+    }
+    if (Object.keys(iafUpdate).length) {
+      await fetch('/api/seller-metas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(iafUpdate),
+      });
+      console.log('IAF segments saved for', Object.keys(iafUpdate).length, 'sellers');
+    }
+  }
+
   const sellerMetas = {};
   for (const [name, metas] of Object.entries(comParsedData)) {
     const selId = 'comPdv_' + name.replace(/\s/g,'_');
     const sel = $(selId);
     const pdv = sel ? sel.value : '';
+    // Preserve iafSegment from previous cycle
+    const prevSegment = allSellerMetas[name]?.iafSegment;
     sellerMetas[name] = { ...metas, pdv };
+    if (prevSegment) sellerMetas[name].iafSegment = prevSegment;
   }
   try {
     const r = await fetch('/api/seller-metas', {
