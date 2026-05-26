@@ -299,6 +299,31 @@ section {
       </div>
     </section>
 
+    <!-- ENVIAR SLACK POR LOJA -->
+    <section>
+      <div class="section-label">04 / Enviar Slack</div>
+      <div class="section-title">Enviar metas por loja</div>
+      <div class="section-desc">Selecione uma loja e envie as metas individuais de cada consultora via DM no Slack.</div>
+
+      <div class="field" style="max-width:320px; margin-bottom:14px">
+        <label>Loja</label>
+        <select id="slackStoreSelect">
+          <option value="24303">Sao Sebastiao (24303)</option>
+          <option value="24617">Sustentavel (24617)</option>
+          <option value="24668">Palmeira (24668)</option>
+          <option value="24669">Penedo (24669)</option>
+          <option value="24670">Teotonio (24670)</option>
+          <option value="24671">Coruripe (24671)</option>
+        </select>
+      </div>
+
+      <div id="slackSellerList" style="margin-bottom:14px;"></div>
+
+      <div class="btn-row">
+        <button id="slackSendAllBtn">Enviar Slack para todos da loja</button>
+      </div>
+    </section>
+
     <!-- IMPORTAR COMISSÃO -->
     <section>
       <div class="section-label">04 / Importar comissao</div>
@@ -417,6 +442,8 @@ function showAdminPanel() {
   loadFiles();
   loadMetas();
   loadStoreMetas();
+  loadSellerMetas().then(renderSlackSellerList);
+  loadGlobalMetasForSlack();
 }
 
 $('logoutBtn').addEventListener('click', async () => {
@@ -562,6 +589,122 @@ $('resetMetas').addEventListener('click', () => {
     if (el) el.value = val;
   }
   toast('Metas resetadas para o padrao. Clique em Salvar para confirmar.');
+});
+
+// ---------- Slack por Loja ----------
+const LOJA_NAMES = { '24303':'Sao Sebastiao','24617':'Sustentavel','24668':'Palmeira','24669':'Penedo','24670':'Teotonio','24671':'Coruripe' };
+const SLACK_IDS = { _default: 'U0895CZ8HU7' };
+let allSellerMetas = {};
+let globalMetas = {};
+
+async function loadSellerMetas() {
+  try {
+    const r = await fetch('/api/seller-metas');
+    if (r.ok) allSellerMetas = await r.json();
+  } catch {}
+}
+
+async function loadGlobalMetasForSlack() {
+  try {
+    const r = await fetch('/api/metas');
+    if (r.ok) globalMetas = await r.json();
+  } catch {}
+}
+
+function renderSlackSellerList() {
+  const pdv = $('slackStoreSelect').value;
+  const list = $('slackSellerList');
+  const sellers = Object.entries(allSellerMetas).filter(([, d]) => d.pdv === pdv);
+  if (!sellers.length) {
+    list.innerHTML = '<div style="color:var(--ink-dim); font-size:13px; padding:12px;">Nenhuma consultora nesta loja. Importe a planilha de comissao primeiro.</div>';
+    return;
+  }
+  let html = '<div class="file-grid">';
+  for (const [name, m] of sellers) {
+    const rec = m.receita ? 'R$ ' + Math.round(m.receita).toLocaleString('pt-BR') : '—';
+    const sk = m.skin ? 'R$ ' + Math.round(m.skin).toLocaleString('pt-BR') : '—';
+    const svc = m.servicos ? Math.round(m.servicos) : '—';
+    html += `<div class="file-row">
+      <div class="file-dot ok"></div>
+      <div class="file-name" style="flex:1;">${name}</div>
+      <div class="file-info">Rec ${rec} · Skin ${sk} · Svc ${svc}</div>
+    </div>`;
+  }
+  html += '</div>';
+  list.innerHTML = html;
+}
+
+$('slackStoreSelect').addEventListener('change', renderSlackSellerList);
+
+function buildAdminSlackMsg(name, metas, pdv) {
+  const store = LOJA_NAMES[pdv] || pdv;
+  const fmtR = (v) => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+  const fmtPct = (v) => { const n = typeof v === 'string' ? parseFloat(v) : v; return n < 1 ? (n * 100).toFixed(0) + '%' : n.toFixed(0) + '%'; };
+  const today = new Date();
+  const fmtDate = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  let diasUteis = 0;
+  for (let d = new Date(today); d <= endOfMonth; d.setDate(d.getDate() + 1)) { if (d.getDay() !== 0) diasUteis++; }
+  if (diasUteis < 1) diasUteis = 1;
+
+  let msg = `:memo: METAS DO CICLO – ${store} (${pdv})\n`;
+  msg += `Consultora: *${name}*\n`;
+  msg += `_${fmtDate} · ${diasUteis} dias uteis restantes_\n\n`;
+
+  if (metas.receita) {
+    const diaria = Math.round(metas.receita / diasUteis);
+    msg += `:bar_chart: META DE RECEITA\n`;
+    msg += ` • Meta total: ${fmtR(metas.receita)}\n`;
+    msg += ` • Meta diaria: ${fmtR(diaria)}\n\n`;
+  }
+  if (metas.skin) {
+    msg += `:woman-getting-massage: META DE SKIN\n`;
+    msg += ` • ${fmtR(metas.skin)}\n\n`;
+  }
+
+  msg += `:rocket: METAS DE INDICADORES\n\n`;
+  if (metas.boletoMedio) msg += `:receipt: Boleto Medio: ${fmtR(metas.boletoMedio)}\n`;
+  if (globalMetas.metaPRM) msg += `:repeat: PRM: ${globalMetas.metaPRM}%\n`;
+  if (globalMetas.metaTurbinado) msg += `:sparkles: Turbinado: ${globalMetas.metaTurbinado}%\n`;
+  if (metas.servicos) msg += `:woman-getting-haircut: Servicos: ${Math.round(metas.servicos)}\n`;
+  if (globalMetas.metaID) msg += `:iphone: ID Cliente: ${globalMetas.metaID}%\n`;
+  if (globalMetas.metaNPS) msg += `:mag_right: NPS: ${globalMetas.metaNPS}%\n`;
+  if (globalMetas.metaResgate) msg += `:anchor: Resgate: ${globalMetas.metaResgate}%\n`;
+  if (globalMetas.metaBBX) msg += `:game_die: Desafio BBX: ${globalMetas.metaBBX}%\n`;
+  if (globalMetas.metaItensBoleto) msg += `:package: Itens/Boleto: ${globalMetas.metaItensBoleto}\n`;
+  if (globalMetas.metaAuditoria) msg += `:clipboard: Auditoria: ${globalMetas.metaAuditoria}%\n`;
+
+  msg += `\n_Gerado por Resultado Diario · Canal Loja_`;
+  return msg;
+}
+
+$('slackSendAllBtn').addEventListener('click', async () => {
+  const pdv = $('slackStoreSelect').value;
+  const sellers = Object.entries(allSellerMetas).filter(([, d]) => d.pdv === pdv);
+  if (!sellers.length) { toast('Nenhuma consultora nesta loja.'); return; }
+
+  const btn = $('slackSendAllBtn');
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+  let sent = 0;
+
+  for (const [name, metas] of sellers) {
+    const channel = SLACK_IDS[name] || SLACK_IDS._default;
+    const msg = buildAdminSlackMsg(name, metas, pdv);
+    try {
+      const r = await fetch('/api/slack/dm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, text: msg }),
+      });
+      if (r.ok) sent++;
+      else console.warn('Slack error for', name);
+    } catch (e) { console.warn('Slack error:', e); }
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Enviar Slack para todos da loja';
+  toast(`${sent}/${sellers.length} mensagens enviadas para ${LOJA_NAMES[pdv]}!`);
 });
 
 // ---------- Import Comissao ----------

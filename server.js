@@ -292,7 +292,7 @@ app.post('/api/slack/send', requireApi, async (req, res) => {
 });
 
 // ---------- Slack DM ----------
-app.post('/api/slack/dm', requireApi, async (req, res) => {
+app.post('/api/slack/dm', requireAnyAuth, async (req, res) => {
   const token = process.env.SLACK_BOT_TOKEN;
   if (!token) return res.status(501).json({ error: 'slack_bot_not_configured' });
   const { channel, text, blocks } = req.body || {};
