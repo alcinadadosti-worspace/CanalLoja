@@ -372,22 +372,24 @@ function renderFileGrid(meta) {
     const info = meta[key];
     const row = document.createElement('div');
     row.className = 'file-row';
+    const dot = document.createElement('div');
+    const nameEl = document.createElement('div');
+    const infoEl = document.createElement('div');
+    dot.className = info ? 'file-dot ok' : 'file-dot missing';
+    nameEl.className = 'file-name';
+    nameEl.textContent = LABELS[key];
+    infoEl.className = 'file-info';
     if (info) {
       count++;
       const d = new Date(info.mtime);
       const fmt = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-      row.innerHTML = `
-        <div class="file-dot ok"></div>
-        <div class="file-name">${LABELS[key]}</div>
-        <div class="file-info">${info.filename} &middot; ${fmt} &middot; ${info.uploader}</div>
-      `;
+      infoEl.textContent = `${info.filename} · ${fmt} · ${info.uploader}`;
     } else {
-      row.innerHTML = `
-        <div class="file-dot missing"></div>
-        <div class="file-name">${LABELS[key]}</div>
-        <div class="file-info">pendente</div>
-      `;
+      infoEl.textContent = 'pendente';
     }
+    row.appendChild(dot);
+    row.appendChild(nameEl);
+    row.appendChild(infoEl);
     grid.appendChild(row);
   }
   $('uploadDesc').textContent = count === 5

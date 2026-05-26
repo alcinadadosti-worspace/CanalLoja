@@ -1,7 +1,22 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { USERS } = require('../config/users');
 
-const SECRET = process.env.JWT_SECRET || 'dev-secret-change-me-in-render';
+const SECRET = (function resolveSecret() {
+  const env = process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'production') {
+    if (!env || env === 'dev-secret-change-me-in-render') {
+      console.error('[FATAL] JWT_SECRET nao definido em producao. Encerrando.');
+      process.exit(1);
+    }
+    return env;
+  }
+  if (env) return env;
+  const generated = crypto.randomBytes(32).toString('hex');
+  console.warn('[auth] JWT_SECRET nao definido — usando segredo aleatorio (sessoes nao sobrevivem restart)');
+  return generated;
+})();
+
 const COOKIE_NAME = 'canalloja_session';
 const ADMIN_COOKIE = 'canalloja_admin';
 const TOKEN_TTL = '12h';
@@ -22,7 +37,6 @@ function verifyCookie(req) {
   }
 }
 
-// API: returns 401 JSON if not authenticated
 function requireApi(req, res, next) {
   const u = verifyCookie(req);
   if (!u) return res.status(401).json({ error: 'unauthenticated' });
@@ -30,7 +44,6 @@ function requireApi(req, res, next) {
   next();
 }
 
-// Page: redirects to /login.html if not authenticated
 function requirePage(req, res, next) {
   const u = verifyCookie(req);
   if (!u) return res.redirect('/login.html');
@@ -52,7 +65,6 @@ function clearCookie(res) {
   res.clearCookie(COOKIE_NAME);
 }
 
-// ---- Admin cookie (senha mestra que libera upload de planilhas) ----
 function signAdmin() {
   return jwt.sign({ admin: true }, SECRET, { expiresIn: ADMIN_TTL });
 }
@@ -88,7 +100,8 @@ function requireAdmin(req, res, next) {
 
 function requireAdminOnly(req, res, next) {
   if (!isAdmin(req)) return res.status(403).json({ error: 'not_admin' });
-  req.username = req.username || 'admin';
+  const u = verifyCookie(req);
+  req.username = u || 'admin';
   next();
 }
 
@@ -104,4 +117,3 @@ module.exports = {
   setAdminCookie, clearAdminCookie, isAdmin, requireAdmin,
   requireAdminOnly, requireAnyAuth, ADMIN_COOKIE,
 };
-

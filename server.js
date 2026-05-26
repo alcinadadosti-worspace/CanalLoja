@@ -29,11 +29,55 @@ const META_DEFAULTS = {
 };
 const metaStore = { ...META_DEFAULTS };
 
+// ---------- Rate limiter (login endpoints) ----------
+const loginAttempts = new Map();
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+const RATE_MAX_ATTEMPTS = 10;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, times] of loginAttempts) {
+    const recent = times.filter(t => now - t < RATE_WINDOW_MS);
+    if (recent.length === 0) loginAttempts.delete(ip);
+    else loginAttempts.set(ip, recent);
+  }
+}, 60_000).unref();
+
+function loginRateLimit(req, res, next) {
+  const ip = req.ip;
+  const now = Date.now();
+  const times = (loginAttempts.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS);
+  if (times.length >= RATE_MAX_ATTEMPTS) {
+    return res.status(429).json({ error: 'too_many_attempts', message: 'Muitas tentativas. Tente novamente em 15 minutos.' });
+  }
+  times.push(now);
+  loginAttempts.set(ip, times);
+  next();
+}
+
+const UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/;
+
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
+// ---------- CSRF: reject state-changing requests from foreign origins ----------
+app.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const source = req.headers.origin || req.headers.referer;
+  if (!source) return next();
+  try {
+    const url = new URL(source);
+    if (url.host !== req.headers.host) {
+      return res.status(403).json({ error: 'csrf_rejected' });
+    }
+  } catch {
+    return res.status(403).json({ error: 'csrf_rejected' });
+  }
+  next();
+});
+
 // ---------- API ----------
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginRateLimit, async (req, res) => {
   const { username, password } = req.body || {};
   const u = USERS[(username || '').toLowerCase().trim()];
   if (!u) return res.status(401).json({ error: 'invalid_credentials' });
@@ -53,7 +97,7 @@ app.get('/api/me', requireApi, (req, res) => {
 });
 
 // ---------- Admin: senha mestra desbloqueia upload de planilhas ----------
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login', loginRateLimit, async (req, res) => {
   const { password } = req.body || {};
   const ok = await bcrypt.compare(password || '', ADMIN_PASSWORD_HASH);
   if (!ok) return res.status(401).json({ error: 'invalid_admin_password' });
@@ -71,7 +115,7 @@ app.get('/api/admin/me', (req, res) => {
 });
 
 // Legacy
-app.post('/api/admin/verify', requireApi, async (req, res) => {
+app.post('/api/admin/verify', requireApi, loginRateLimit, async (req, res) => {
   const { password } = req.body || {};
   const ok = await bcrypt.compare(password || '', ADMIN_PASSWORD_HASH);
   if (!ok) return res.status(401).json({ error: 'invalid_admin_password' });
@@ -91,9 +135,14 @@ const RAW_XLSX = express.raw({
 });
 app.post('/api/admin/upload', requireAdminOnly, RAW_XLSX, async (req, res) => {
   const key = req.query.key;
-  const filename = String(req.query.filename || '').slice(0, 200) || `upload-${Date.now()}.xlsx`;
   if (!FILE_KEYS.includes(key)) return res.status(400).json({ error: 'invalid_key' });
   if (!req.body || !req.body.length) return res.status(400).json({ error: 'no_data' });
+
+  let filename = String(req.query.filename || '').slice(0, 200).trim();
+  if (!filename) filename = `upload-${Date.now()}.xlsx`;
+  if (UNSAFE_FILENAME_CHARS.test(filename) || filename.includes('..')) {
+    return res.status(400).json({ error: 'invalid_filename', message: 'Nome do arquivo contem caracteres invalidos.' });
+  }
 
   const meta = {
     filename, mtime: new Date().toISOString(),
@@ -101,18 +150,24 @@ app.post('/api/admin/upload', requireAdminOnly, RAW_XLSX, async (req, res) => {
   };
   fileStore[key] = { ...meta, bytes: req.body };
 
+  let backupOk = true;
   try { await supa.uploadFile(key, req.body, meta); }
-  catch (e) { console.warn('[supabase] upload:', e.message); }
+  catch (e) { console.warn('[supabase] upload:', e.message); backupOk = false; }
 
-  res.json({ ok: true, key, size: req.body.length, mtime: meta.mtime });
+  const resp = { ok: true, key, size: req.body.length, mtime: meta.mtime };
+  if (!backupOk) resp.warning = 'Arquivo salvo em memoria, mas backup na nuvem falhou.';
+  res.json(resp);
 });
 
 // Limpa todas as planilhas (admin)
 app.post('/api/admin/clear-files', requireAdminOnly, async (req, res) => {
   for (const key of FILE_KEYS) delete fileStore[key];
+  let backupOk = true;
   try { await supa.deleteAllFiles(FILE_KEYS); }
-  catch (e) { console.warn('[supabase] clear:', e.message); }
-  res.json({ ok: true });
+  catch (e) { console.warn('[supabase] clear:', e.message); backupOk = false; }
+  const resp = { ok: true };
+  if (!backupOk) resp.warning = 'Memoria limpa, mas erro ao remover da nuvem.';
+  res.json(resp);
 });
 
 // ---------- Metas globais ----------
@@ -123,11 +178,23 @@ app.get('/api/metas', (req, res) => {
 app.post('/api/metas', requireAdminOnly, async (req, res) => {
   const updates = req.body || {};
   for (const [key, val] of Object.entries(updates)) {
-    if (key in metaStore) metaStore[key] = String(val);
+    if (!(key in metaStore)) continue;
+    const str = String(val).trim().replace(',', '.');
+    if (str.length > 20) {
+      return res.status(400).json({ error: 'invalid_meta', message: `${key}: valor muito longo.` });
+    }
+    const num = Number(str);
+    if (isNaN(num) || num < 0 || num > 999999) {
+      return res.status(400).json({ error: 'invalid_meta', message: `${key}: deve ser um numero entre 0 e 999999.` });
+    }
+    metaStore[key] = str;
   }
+  let backupOk = true;
   try { await supa.saveMetas({ ...metaStore }); }
-  catch (e) { console.warn('[supabase] metas:', e.message); }
-  res.json({ ok: true, metas: { ...metaStore } });
+  catch (e) { console.warn('[supabase] metas:', e.message); backupOk = false; }
+  const resp = { ok: true, metas: { ...metaStore } };
+  if (!backupOk) resp.warning = 'Metas salvas em memoria, mas backup na nuvem falhou.';
+  res.json(resp);
 });
 
 // Metadados
@@ -164,7 +231,8 @@ app.post('/api/slack/send', requireApi, async (req, res) => {
       hint: 'defina SLACK_WEBHOOK_URL no ambiente' });
   }
   const { text } = req.body || {};
-  if (!text) return res.status(400).json({ error: 'missing_text' });
+  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'missing_text' });
+  if (text.length > 10000) return res.status(400).json({ error: 'text_too_long' });
   try {
     const r = await fetch(webhook, {
       method: 'POST',
@@ -186,12 +254,13 @@ app.get('/admin.html', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
 
-// Página principal protegida
+// Pagina principal protegida
 const INDEX_TEMPLATE = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
 
 function renderIndex(username) {
   const profile = publicProfile(username);
-  const inject = `<script>window.currentUser = ${JSON.stringify(profile)};</script>`;
+  const json = JSON.stringify(profile).replace(/</g, '\\u003c');
+  const inject = `<script>window.currentUser = ${json};</script>`;
   return INDEX_TEMPLATE.replace('<!--USER_INJECT-->', inject);
 }
 
@@ -233,7 +302,14 @@ async function restoreFromSupabase() {
 
 (async () => {
   await restoreFromSupabase();
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`canalloja rodando em http://localhost:${PORT}`);
   });
+  function shutdown(signal) {
+    console.log(`[${signal}] Encerrando...`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 5000).unref();
+  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 })();
