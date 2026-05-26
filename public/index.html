@@ -1474,7 +1474,12 @@
         <div class="dashboard stagger" id="dashLojaCards"></div>
       </div>
       <div class="dash-section">
-        <div class="dash-section-title">Consultoras — destaques</div>
+        <div class="dash-section-title" style="display:flex; align-items:center; justify-content:space-between;">
+          Consultoras — destaques
+          <button id="slackSendBtn" class="secondary" style="font-size:11px; padding:6px 14px; border-radius:4px;">
+            Enviar para Slack
+          </button>
+        </div>
         <div id="dashSellers"></div>
       </div>
     </div>
@@ -3264,6 +3269,31 @@ function renderDashboard() {
 
   $('dashSellers').innerHTML = sellersHtml;
 
+  // Store seller data for Slack sending
+  window._slackSellerData = sellerScores.map((s, idx) => {
+    const medal = idx < 3 ? medals[idx] : '';
+    const dot = (pct) => pct >= 1 ? '🟢' : pct >= 0.5 ? '🟡' : pct > 0 ? '🔴' : '⚪';
+    const metaR = nlz(metaPerSeller[s.can]?.receita);
+    const metaS = nlz(metaPerSeller[s.can]?.skin);
+    const metaSvc = nlz(metaPerSeller[s.can]?.servicos);
+    return {
+      name: aliasOf(s.can), medal, can: s.can,
+      lines: [
+        { label: 'Receita', value: fmtBRL(s.ps.receita), meta: metaR ? fmtBRL(metaR) : '', dot: dot(s.pctR) },
+        { label: 'Skin', value: fmtBRL(s.ps.skin), meta: metaS ? fmtBRL(metaS) : '', dot: dot(s.pctS) },
+        { label: 'Boleto Médio', value: fmtBRL(s.ps.boletoMedio), meta: metaBoletoLoja ? fmtBRL(metaBoletoLoja) : '', dot: dot(metaBoletoLoja ? s.ps.boletoMedio/metaBoletoLoja : 0) },
+        { label: 'Itens/Boleto', value: s.ps.itensBoleto.toFixed(2).replace('.',','), meta: metaItens ? metaItens.toFixed(1).replace('.',',') : '', dot: dot(metaItens ? s.ps.itensBoleto/metaItens : 0) },
+        { label: 'PRM', value: s.ps.prm.toFixed(2).replace('.',',')+'%', meta: metaPRM ? metaPRM+'%' : '', dot: dot(metaPRM ? s.ps.prm/metaPRM : 0) },
+        { label: 'Turbinado', value: s.ps.turbinado.toFixed(2).replace('.',',')+'%', meta: metaTurb ? metaTurb+'%' : '', dot: dot(metaTurb ? s.ps.turbinado/metaTurb : 0) },
+        { label: 'ID Cliente', value: s.ps.idCliente.toFixed(2).replace('.',',')+'%', meta: metaID ? metaID+'%' : '', dot: dot(metaID ? s.ps.idCliente/metaID : 0) },
+        { label: 'Resgate', value: s.ps.resgate.toFixed(2).replace('.',',')+'%', meta: metaResgate ? metaResgate+'%' : '', dot: dot(metaResgate ? s.ps.resgate/metaResgate : 0) },
+        { label: 'BBX', value: s.ps.bbx.toFixed(2).replace('.',',')+'%', meta: metaBBX ? metaBBX+'%' : '', dot: dot(metaBBX ? s.ps.bbx/metaBBX : 0) },
+        { label: 'Serviços', value: fmtInt(s.ps.servicos), meta: metaSvc ? String(Math.round(metaSvc)) : '', dot: dot(metaSvc ? s.ps.servicos/metaSvc : 0) },
+      ],
+    };
+  });
+  window._slackStoreName = sName ? `${sName} – ${selectedPdv}` : `Loja ${selectedPdv}`;
+
   // Render também as outras abas (com try-catch pra não quebrar a aba "Loja" se algo falhar)
   try { renderHubTab(); } catch(e) { console.error('Hub tab error:', e); }
   try { renderComparativoTab(); } catch(e) { console.error('Comparativo tab error:', e); }
@@ -4045,6 +4075,39 @@ document.addEventListener('DOMContentLoaded', () => {
   bindDashTabs();
   bindCardGlow();
   bindButtonRipple();
+
+  // Slack DM button
+  const slackBtn = $('slackSendBtn');
+  if (slackBtn) slackBtn.addEventListener('click', async () => {
+    const data = window._slackSellerData;
+    if (!data || !data.length) { toast('Nenhuma consultora no dashboard.'); return; }
+    const storeName = window._slackStoreName || 'Loja';
+    slackBtn.disabled = true;
+    slackBtn.textContent = 'Enviando...';
+    let sent = 0;
+    const TEST_CHANNEL = 'U0895CZ8HU7';
+    for (const s of data) {
+      let msg = `📊 *Resultado Diário — ${storeName}*\n\n`;
+      msg += `*${s.name}* ${s.medal}\n`;
+      for (const l of s.lines) {
+        msg += `${l.label}: \`${l.value}\``;
+        if (l.meta) msg += ` · Meta: ${l.meta}`;
+        msg += ` ${l.dot}\n`;
+      }
+      try {
+        const r = await fetch('/api/slack/dm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel: TEST_CHANNEL, text: msg }),
+        });
+        if (r.ok) sent++;
+        else { const j = await r.json(); console.warn('Slack error:', j); }
+      } catch (e) { console.warn('Slack send error:', e); }
+    }
+    slackBtn.disabled = false;
+    slackBtn.textContent = 'Enviar para Slack';
+    toast(`${sent}/${data.length} mensagens enviadas!`);
+  });
 
   // Carrega metas globais do servidor
   async function loadGlobalMetas() {
