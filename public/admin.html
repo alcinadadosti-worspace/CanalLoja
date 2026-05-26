@@ -752,7 +752,7 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaSvc) { iafMax += IAF_W.servicos; }
   const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
   const savedPct = parseFloat(allSellerMetas[name]?.iafSegment) || 0;
-  const iafPct = Math.max(calcPct, savedPct);
+  const iafPct = savedPct > 0 ? savedPct : calcPct;
   const iafTier = IAF_TIERS.find(t => iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
 
   let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
@@ -938,8 +938,7 @@ $('comConfirmBtn').addEventListener('click', async () => {
       if (mi) { pts += Math.min(1, (actual.idCliente||0) / mi) * IAF_W.idCliente; max += IAF_W.idCliente; }
       if (metas.servicos) { max += IAF_W.servicos; }
       const pct = max > 0 ? pts / max : 0;
-      const savedPct = parseFloat(metas.iafSegment) || 0;
-      iafUpdate[name] = { iafSegment: Math.max(pct, savedPct) };
+      iafUpdate[name] = { iafSegment: pct };
     }
     if (Object.keys(iafUpdate).length) {
       await fetch('/api/seller-metas', {

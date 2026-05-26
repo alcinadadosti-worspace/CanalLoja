@@ -3248,7 +3248,8 @@ function renderDashboard() {
     if (metaSvc) { iafPts += Math.min(1, ps.servicos / metaSvc) * IAF_WEIGHTS.servicos; iafMax += IAF_WEIGHTS.servicos; }
     const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
     const savedPct = nlz(window._serverSellerMetas?.[s.can]?.iafSegment);
-    s.iafPct = Math.max(calcPct, savedPct);
+    s.iafCalcPct = calcPct;
+    s.iafPct = savedPct > 0 ? savedPct : calcPct;
     s.iafPts = iafPts;
     s.iafMax = iafMax;
     s.iafTier = IAF_TIERS.find(t => s.iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
@@ -3273,7 +3274,8 @@ function renderDashboard() {
         <div>${dot}</div>
       </div>`;
     };
-    const tierBadge = `<span style="font-size:10px; padding:2px 8px; border-radius:10px; background:rgba(231,196,108,0.12); color:var(--accent); font-family:'JetBrains Mono',monospace; letter-spacing:0.05em; margin-left:6px;">${s.iafTier.emoji} ${s.iafTier.label} · ${Math.round(s.iafPct*100)}%</span>`;
+    const progressTxt = s.iafCalcPct !== s.iafPct ? ` · atual ${Math.round(s.iafCalcPct*100)}%` : '';
+    const tierBadge = `<span style="font-size:10px; padding:2px 8px; border-radius:10px; background:rgba(231,196,108,0.12); color:var(--accent); font-family:'JetBrains Mono',monospace; letter-spacing:0.05em; margin-left:6px;">${s.iafTier.emoji} ${s.iafTier.label}${progressTxt}</span>`;
     return `<div class="dash-seller">
       <div class="dash-seller-name" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
         <span>${aliasOf(s.can)} <span class="dash-seller-medal">${medal}</span> ${tierBadge}</span>
@@ -4123,7 +4125,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let msg = `:memo: RESULTADO ATÉ O DIA – [${s.fmtDate}]\n`;
     msg += `Loja: ${store}\n`;
     msg += `Consultora: *${s.name}*\n`;
-    if (s.iafTier) msg += `${TIER_SLACK[s.iafTier.label] || ''} Segmento: *${s.iafTier.label}* (${Math.round(s.iafPct*100)}% IAF)\n`;
+    if (s.iafTier) {
+      msg += `${TIER_SLACK[s.iafTier.label] || ''} Segmento: *${s.iafTier.label}*`;
+      if (s.iafCalcPct !== undefined) msg += ` · progresso ciclo: ${Math.round(s.iafCalcPct*100)}%`;
+      msg += `\n`;
+    }
     msg += `\n`;
 
     if (s.metaR) {
