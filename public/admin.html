@@ -594,7 +594,33 @@ $('resetMetas').addEventListener('click', () => {
 
 // ---------- Slack por Loja ----------
 const LOJA_NAMES = { '24303':'Sao Sebastiao','24617':'Sustentavel','24668':'Palmeira','24669':'Penedo','24670':'Teotonio','24671':'Coruripe' };
-const SLACK_IDS = { _default: 'U0895CZ8HU7' };
+const SLACK_IDS = {
+  _default: 'U0895CZ8HU7', // Eduardo (teste / fallback)
+  // Coruripe (24671)
+  'ANA PAULA': 'U087E6YNPRD',
+  'BRUNA': 'U08NLNHF29G',
+  // Digital
+  'ANNY': 'U08JFCGBFSA',
+  // Palmeira (24668)
+  'CECÍLIA': 'U0AL2NDNH09',       // Maria Cicília Brito Veiga
+  'VALESCA': 'U087M7GCNMC',
+  'YASMIN': 'U0A5YLESW1E',
+  // Penedo (24669)
+  'DEISE': 'U092FQKNFPB',
+  'JOANA': 'U0ARN2C0YLT',          // Joanna Queiroz
+  'MARIA FERNANDA': 'U0ASUE1GNUA',
+  // Sao Sebastiao (24303)
+  'MARYANNA': 'U09ED214T6W',
+  'NAYARA': 'U0B1D2NM47M',
+  // Sustentavel Palmeira (24617)
+  'EDUARDA': 'U0AKMS2LNEA',
+  'ALEXIA': 'U0ALX1EJUC8',         // Larissa Alexia da Silva Souza
+  // Teotonio Vilela (24670)
+  'CAMILLE': 'U09JGAFFZB6',
+  'ELIENE': 'U087P8JF97F',
+  'JOSENILDO': 'U0ASY08QHTN',      // JÚNIOR é mesclado para JOSENILDO no import
+  'SHAYANE': 'U0AT1KKLWNS',
+};
 let allSellerMetas = {};
 let globalMetas = {};
 
