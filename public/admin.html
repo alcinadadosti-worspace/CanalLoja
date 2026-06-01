@@ -509,6 +509,20 @@ async function handleFiles(fileList) {
     if (!key) { toast(`${file.name} nao reconhecido.`); continue; }
     try {
       const buf = await file.arrayBuffer();
+      // Pre-valida xlsx antes de subir (detecta corrompido / sem abas)
+      let wb;
+      try {
+        wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+        if (!wb.SheetNames || !wb.SheetNames.length) throw new Error('sem abas');
+      } catch (xe) {
+        toast(`${file.name}: arquivo invalido/corrompido (${xe.message})`);
+        continue;
+      }
+      // Aviso (nao bloqueia) se Resumo vier sem aba CONSULTOR
+      if (key === 'resumo') {
+        const hasConsultor = wb.SheetNames.some(s => s.toUpperCase() === 'CONSULTOR');
+        if (!hasConsultor) toast(`Aviso: Resumo sem aba CONSULTOR — Slack vai com realizado zerado.`);
+      }
       const r = await fetch(
         `/api/admin/upload?key=${key}&filename=${encodeURIComponent(file.name)}`,
         { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf }
@@ -522,6 +536,8 @@ async function handleFiles(fileList) {
   if (uploaded) {
     toast(`${uploaded} planilha(s) enviada(s).`);
     loadFiles();
+    adminConsultorData = {};
+    loadAdminResumo({ verbose: true });
   }
 }
 
@@ -672,12 +688,22 @@ function normNameAdmin(s) {
   return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
 }
 
-async function loadAdminResumo() {
+async function loadAdminResumo(opts = {}) {
+  const verbose = !!opts.verbose;
   try {
     const r = await fetch('/api/files/resumo');
-    if (!r.ok) return;
+    if (!r.ok) {
+      if (verbose) toast('Planilha Resumo nao encontrada no servidor.');
+      return;
+    }
     const buf = await r.arrayBuffer();
-    const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); }
+    catch (xe) {
+      console.warn('loadAdminResumo XLSX.read:', xe);
+      if (verbose) toast(`Resumo corrompido: ${xe.message}`);
+      return;
+    }
 
     const pdvSheet = wb.SheetNames.find(s => s === 'PDV');
     if (pdvSheet) {
@@ -688,12 +714,15 @@ async function loadAdminResumo() {
           adminResumoData[pdv] = { receita: typeof r[1]==='number'?r[1]:0, boletos: typeof r[4]==='number'?r[4]:0, boletoMedio: typeof r[7]==='number'?r[7]:0 };
         }
       }
+    } else if (verbose) {
+      toast('Aviso: Resumo sem aba PDV — totais por loja indisponiveis.');
     }
 
     const csName = wb.SheetNames.find(s => s.toUpperCase() === 'CONSULTOR');
     if (csName) {
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[csName], { header: 1, defval: '' });
       const nlz = (v) => { if (v==null||v===''||v==='-') return 0; const n=typeof v==='number'?v:parseFloat(String(v).replace(',','.')); return isNaN(n)?0:n; };
+      let parsed = 0;
       for (const r of rows.slice(2)) {
         const name = normNameAdmin(r[0]);
         const pdv = String(r[1]||'').trim();
@@ -705,9 +734,19 @@ async function loadAdminResumo() {
           itensBoleto: nlz(r[10]), turbinado: nlz(r[14])*100,
           resgate: nlz(r[26])*100, skin: nlz(r[30])*100, idCliente: nlz(r[32]),
         };
+        parsed++;
       }
+      if (verbose) {
+        if (parsed === 0) toast('Aviso: aba CONSULTOR vazia — Slack iria com zeros.');
+        else toast(`${parsed} consultoras carregadas do Resumo.`);
+      }
+    } else if (verbose) {
+      toast('Aviso: Resumo sem aba CONSULTOR — Slack iria com zeros.');
     }
-  } catch (e) { console.warn('loadAdminResumo:', e); }
+  } catch (e) {
+    console.warn('loadAdminResumo:', e);
+    if (verbose) toast(`Erro lendo Resumo: ${e.message}`);
+  }
 }
 
 function findConsultorActual(sellerName, pdv) {
@@ -823,6 +862,21 @@ $('slackSendAllBtn').addEventListener('click', async () => {
   const sellers = Object.entries(allSellerMetas).filter(([n, d]) => d.pdv === pdv && !SKIP_NAMES.test(n));
   if (!sellers.length) { toast('Nenhuma consultora nesta loja.'); return; }
 
+  // Guard: bloquear envio se nao temos dados de realizado (evita Slack com tudo zerado)
+  const hasDataForPdv = Object.values(adminConsultorData).some(d => d.pdv === pdv);
+  if (!hasDataForPdv) {
+    const proceed = confirm(
+      `ATENCAO: nenhum dado de realizado carregado para esta loja.\n\n` +
+      `As mensagens iriam com receita/skin/boleto medio TODOS ZERADOS.\n\n` +
+      `Causas comuns:\n` +
+      `• Planilha Resumo nao foi subida\n` +
+      `• Resumo veio sem a aba CONSULTOR\n` +
+      `• Esta loja nao tem dados ainda no ciclo\n\n` +
+      `Deseja enviar mesmo assim?`
+    );
+    if (!proceed) return;
+  }
+
   const btn = $('slackSendAllBtn');
   btn.disabled = true;
   btn.textContent = 'Enviando...';
@@ -888,13 +942,19 @@ function parseComSheet(wb, sheetName, nc, vc, mc) {
 
 async function handleComFile(file) {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
+  let wb;
+  try { wb = XLSX.read(buf, { type: 'array' }); }
+  catch (xe) { toast(`Comissao corrompida: ${xe.message}`); return; }
+  if (!wb.SheetNames || !wb.SheetNames.length) { toast('Comissao sem abas.'); return; }
+
   const all = {};
   const sheets = [
     ['Gerente de unidade loja',1,2,2], ['Gerente de canal Loja',1,2,2],
     ['Consultor de loja',1,2,2], ['Consultora de serviços',0,1,1], ['Consultor Loja digital',0,1,1],
   ];
+  const missingSheets = [];
   for (const [name,nc,vc,mc] of sheets) {
+    if (!wb.Sheets[name]) { missingSheets.push(name); continue; }
     for (const [n,m] of Object.entries(parseComSheet(wb,name,nc,vc,mc))) {
       if (!all[n]) all[n] = {};
       Object.assign(all[n], m);
@@ -904,8 +964,16 @@ async function handleComFile(file) {
   if (all['JÚNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JÚNIOR']}; delete all['JÚNIOR']; }
   if (all['JUNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JUNIOR']}; delete all['JUNIOR']; }
 
+  const count = Object.keys(all).length;
+  if (count === 0) {
+    toast('Comissao sem consultoras reconhecidas — formato pode ter mudado.');
+    return;
+  }
+  if (missingSheets.length) toast(`Aviso: abas ausentes na comissao: ${missingSheets.join(', ')}`);
+
   comParsedData = all;
   renderComPreview();
+  toast(`Comissao lida: ${count} consultora(s) encontrada(s).`);
 }
 
 function renderComPreview() {
