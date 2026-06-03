@@ -1583,7 +1583,7 @@ const RESUMO_CONSULTOR_COLS = {
   itensBoleto: 10,
   turbinado: 14,
   resgate: 26,
-  prm: 28,
+  prm: 22,   // "Penetração de Boletos 1" (antes apontava p/ 28 "Conversão de Ação de Fluxo", errado)
   skin: 30,
   idCliente: 32,
 };
@@ -1595,11 +1595,51 @@ const RESUMO_PDV_COLS = {
   itensBoleto: 13,
   turbinado: 19,
   resgate: 37,
-  prm: 40,
+  prm: 31,   // "Penetração de Boletos 1" (antes apontava p/ 40 "Conversão de Ação de Fluxo", errado)
   skin: 43,
   idCliente: 46,
   servicos: 49,
 };
+
+// Nomes de cabeçalho dos indicadores na planilha Resumo. Resolvemos o índice da
+// coluna pelo NOME (não por posição fixa): se o Boticário reordenar/renomear
+// colunas, o app acompanha — e evita o tipo de erro que mapeou o PRM pra coluna
+// errada. Cai no índice fixo (fallback) e avisa no console se o nome não bater.
+const RESUMO_COL_NAMES = {
+  receita:     'Receita',
+  boletos:     'Quantidade de Boletos',
+  boletoMedio: 'Boleto Médio',
+  itensBoleto: 'Itens por Boleto',
+  turbinado:   'Penetração de Boleto Turbinado',
+  resgate:     'Resgate Fidelidade',
+  prm:         'Penetração de Boletos 1',
+  skin:        'Penetração de Cuidados Faciais',
+  idCliente:   '% Boletos ID Cliente',
+  servicos:    'Quantidade de Serviços em Loja',
+};
+
+// Sobrescreve os índices do mapa (in place) com os achados pelo nome no cabeçalho.
+function resolveResumoCols(headerRow, colsMap) {
+  if (!headerRow) return;
+  for (const key of Object.keys(colsMap)) {
+    const name = RESUMO_COL_NAMES[key];
+    if (!name) continue;
+    const idx = headerRow.findIndex(c => String(c == null ? '' : c).trim() === name);
+    if (idx >= 0) colsMap[key] = idx;
+    else console.warn(`[resumo] coluna "${name}" (${key}) não encontrada no cabeçalho — usando índice fixo ${colsMap[key]}`);
+  }
+}
+
+// Fração (0–1) → percentual, com trava de sanidade: penetração/conversão não passa
+// de 100%. Se passar, é sinal de coluna errada — avisa no console e limita a 0–100.
+function pctClamp(frac, label) {
+  let p = nlz(frac) * 100;
+  if (p < 0 || p > 100) {
+    console.warn(`[indicador] ${label} = ${p.toFixed(2)}% fora da faixa 0–100% — verifique o mapeamento da coluna`);
+    p = Math.max(0, Math.min(100, p));
+  }
+  return p;
+}
 
 const loadedWorkbooks = {};
 let storesCatalog = {};
@@ -2403,6 +2443,13 @@ function extractAll(pdv, sellers) {
   const pdvRow = findPdvRow(pdv);
   if (!pdvRow) throw new Error(`PDV ${pdv} não encontrado na Resumo PDV`);
 
+  // Resolve as colunas pelo nome do cabeçalho (corrige o PRM e blinda contra
+  // reordenação de colunas na planilha). Altera os mapas globais in place.
+  const pdvSheet = getSheet('resumo', 'PDV');
+  resolveResumoCols(pdvSheet && pdvSheet[0], RESUMO_PDV_COLS);
+  const consSheet = getSheet('resumo', 'Consultor');
+  resolveResumoCols(consSheet && consSheet[0], RESUMO_CONSULTOR_COLS);
+
   // Helper: derive meta from "Vs. Meta PEF" column (value at idx, vs at idx+1)
   // vs_meta = (realizado - meta) / meta  →  meta = realizado / (1 + vs_meta)
   const deriveMeta = (valueIdx, vsIdx) => {
@@ -2421,7 +2468,7 @@ function extractAll(pdv, sellers) {
     itensBoleto: nlz(pdvRow[RESUMO_PDV_COLS.itensBoleto]),
     turbinado: nlz(pdvRow[RESUMO_PDV_COLS.turbinado]) * 100,
     resgate: nlz(pdvRow[RESUMO_PDV_COLS.resgate]),  // already in %
-    prm: nlz(pdvRow[RESUMO_PDV_COLS.prm]) * 100,
+    prm: pctClamp(pdvRow[RESUMO_PDV_COLS.prm], 'PRM loja ' + pdv),
     skin: 0,  // will be filled from cuidadosFaciais file
     idCliente: nlz(pdvRow[RESUMO_PDV_COLS.idCliente]) * 100,
     servicos: 0,  // will be filled from servicosRealizados PDV sheet (more accurate than Resumo)
@@ -2568,7 +2615,7 @@ function extractAll(pdv, sellers) {
       itensBoleto: sumBoletos > 0 ? sumItensTimesBoletos / sumBoletos : 0,
       turbinado: sumTurbBoletos > 0 ? (sumTurbNum / sumTurbBoletos) * 100 : 0,
       resgate: sumResgateBoletos > 0 ? sumResgateNum / sumResgateBoletos : 0,
-      prm: sumPrmBase > 0 ? (sumPrmNum / sumPrmBase) * 100 : 0,
+      prm: sumPrmBase > 0 ? pctClamp(sumPrmNum / sumPrmBase, 'PRM ' + can) : 0,
       idCliente: sumIdBase > 0 ? sumIdNum / sumIdBase : 0,
       skin: skin,
       servicos: servicos,
