@@ -802,11 +802,8 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25, servicos: 35 };
   const IAF_TIERS = [
     { min: 0.95, label: 'Diamante', slack: ':gem:' },
-    { min: 0.85, label: 'Esmeralda', slack: ':green_heart:' },
-    { min: 0.75, label: 'Rubi', slack: ':heart_on_fire:' },
-    { min: 0.65, label: 'Platina', slack: ':white_circle:' },
-    { min: 0.55, label: 'Ouro', slack: ':first_place_medal:' },
-    { min: 0.40, label: 'Prata', slack: ':second_place_medal:' },
+    { min: 0.85, label: 'Ouro', slack: ':first_place_medal:' },
+    { min: 0.75, label: 'Prata', slack: ':second_place_medal:' },
     { min: 0, label: 'Bronze', slack: ':third_place_medal:' },
   ];
   let iafPts = 0, iafMax = 0;
