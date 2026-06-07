@@ -287,9 +287,8 @@ section {
       </div>
 
       <div>
-        <div class="section-label" style="margin-bottom:10px; color:var(--accent);">NPS & Auditoria</div>
+        <div class="section-label" style="margin-bottom:10px; color:var(--accent);">Auditoria</div>
         <div class="meta-grid">
-          <div class="meta-field"><label>NPS Loja (%)</label><input type="text" id="smNpsLoja" placeholder="ex: 90"></div>
           <div class="meta-field"><label>Auditoria Loja (%)</label><input type="text" id="smAuditoriaLoja" placeholder="ex: 95"></div>
         </div>
       </div>
@@ -673,10 +672,30 @@ function renderSlackSellerList() {
       <div class="file-dot ok"></div>
       <div class="file-name" style="flex:1;">${name}</div>
       <div class="file-info">Rec ${rec} · Skin ${sk} · Svc ${svc}</div>
+      <div class="file-info" style="display:flex; align-items:center; gap:5px;">NPS
+        <input type="text" data-nps-seller="${name}" value="${m.nps || ''}" placeholder="0"
+          style="width:50px; text-align:right; padding:3px 6px;">%</div>
     </div>`;
   }
   html += '</div>';
   list.innerHTML = html;
+
+  // NPS por consultora: salva individualmente (merge no servidor preserva receita/skin)
+  list.querySelectorAll('[data-nps-seller]').forEach(input => {
+    input.addEventListener('change', async (e) => {
+      const sellerName = e.target.dataset.npsSeller;
+      const val = e.target.value.trim();
+      if (allSellerMetas[sellerName]) allSellerMetas[sellerName].nps = val;
+      try {
+        const r = await fetch('/api/seller-metas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [sellerName]: { nps: val } }),
+        });
+        if (r.ok) toast(`NPS de ${sellerName}: ${val || '0'}%`);
+        else toast('Erro ao salvar NPS.');
+      } catch (err) { toast('Erro ao salvar NPS: ' + err.message); }
+    });
+  });
 }
 
 $('slackStoreSelect').addEventListener('change', renderSlackSellerList);
@@ -843,12 +862,18 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaTurb) msg += `:sparkles: Turbinado (Meta: ${metaTurb}%)\n • ${fmtPct(aTurb)} ${dot(aTurb, metaTurb)}\n\n`;
   if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • 0 ${dot(0, metaSvc)}\n\n`;
   if (metaID) msg += `:iphone: ID Cliente (Meta: ${metaID}%)\n • ${fmtPct(aID)} ${dot(aID, metaID)}\n\n`;
-  if (metaNPS) msg += `:mag_right: NPS (Meta: ${metaNPS}%)\n • 0,00% ${dot(0, metaNPS)}\n\n`;
+  if (metaNPS) {
+    const aNps = parseFloat(String(metas.nps ?? '').replace(',', '.')) || 0;
+    msg += `:mag_right: NPS (Meta: ${metaNPS}%)\n • ${fmtPct(aNps)} ${dot(aNps, metaNPS)}\n\n`;
+  }
   if (metaResgate) msg += `:anchor: Resgate (Meta: ${metaResgate}%)\n • ${fmtPct(aResgate)} ${dot(aResgate, metaResgate)}\n\n`;
   if (metaBBX) msg += `:game_die: Desafio BBX (Meta: ${metaBBX}%)\n • 0,00% ${dot(0, metaBBX)}\n\n`;
   if (metaItens) msg += `:package: Itens/Boleto (Meta: ${metaItens})\n • ${aItens.toFixed(2).replace('.',',')} ${dot(aItens, metaItens)}\n\n`;
   if (metaSkin) msg += `:skin-tone-3: Skin (Meta: ${fmtR(metaSkin)})\n • ${fmtR(aSkin)} ${dot(aSkin, metaSkin)}\n\n`;
-  if (metaAudit) msg += `:clipboard: Auditoria (Meta: ${metaAudit}%)\n • 0,00% ${dot(0, metaAudit)}\n\n`;
+  if (metaAudit) {
+    const aAudit = parseFloat(String(allStoreMetas[pdv]?.auditoriaLoja ?? '').replace(',', '.')) || 0;
+    msg += `:clipboard: Auditoria (Meta: ${metaAudit}%)\n • ${fmtPct(aAudit)} ${dot(aAudit, metaAudit)}\n\n`;
+  }
 
   msg += `_Gerado por Resultado Diario · Canal Loja_`;
   return msg;
@@ -1070,7 +1095,7 @@ $('comConfirmBtn').addEventListener('click', async () => {
       const bm = bms.length ? Math.round(bms.reduce((a,b) => a+b, 0) / bms.length) : '';
       await fetch(`/api/store-metas/${pdv}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receitaLoja: String(Math.round(rec)), skinLoja: String(Math.round(sk)), boletoMedio: bm ? String(bm) : '', npsLoja: '90', auditoriaLoja: '95' }),
+        body: JSON.stringify({ receitaLoja: String(Math.round(rec)), skinLoja: String(Math.round(sk)), boletoMedio: bm ? String(bm) : '', auditoriaLoja: '95' }),
       });
     }
     toast('Metas por loja recalculadas!');
@@ -1092,8 +1117,8 @@ comDz.addEventListener('dragleave', () => comDz.classList.remove('dragging'));
 comDz.addEventListener('drop', e => { e.preventDefault(); comDz.classList.remove('dragging'); if (e.dataTransfer.files[0]) handleComFile(e.dataTransfer.files[0]); });
 
 // ---------- Store Metas ----------
-const STORE_META_FIELDS = ['smReceitaLoja', 'smBoletoMedio', 'smSkinLoja', 'smNpsLoja', 'smAuditoriaLoja'];
-const SM_KEY_MAP = { smReceitaLoja: 'receitaLoja', smBoletoMedio: 'boletoMedio', smSkinLoja: 'skinLoja', smNpsLoja: 'npsLoja', smAuditoriaLoja: 'auditoriaLoja' };
+const STORE_META_FIELDS = ['smReceitaLoja', 'smBoletoMedio', 'smSkinLoja', 'smAuditoriaLoja'];
+const SM_KEY_MAP = { smReceitaLoja: 'receitaLoja', smBoletoMedio: 'boletoMedio', smSkinLoja: 'skinLoja', smAuditoriaLoja: 'auditoriaLoja' };
 let allStoreMetas = {};
 
 async function loadStoreMetas() {
