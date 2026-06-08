@@ -78,6 +78,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// ---------- Health check (publico, para UptimeRobot/Render) ----------
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
 // ---------- API ----------
 app.post('/api/login', loginRateLimit, async (req, res) => {
   const { username, password } = req.body || {};
