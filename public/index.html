@@ -3314,9 +3314,9 @@ function renderDashboard() {
     if (metaPerSeller[s.can]?.idCliente && metaID) { iafPts += Math.min(1, ps.idCliente / metaID) * IAF_WEIGHTS.idCliente; iafMax += IAF_WEIGHTS.idCliente; }
     // Servicos fora do IAF: sem realizado carregado, penalizava quem tinha a meta
     const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
-    const savedPct = nlz(window._serverSellerMetas?.[s.can]?.iafSegment);
+    // Segmento ao vivo: muda conforme vendas/indicadores crescem durante o ciclo.
     s.iafCalcPct = calcPct;
-    s.iafPct = savedPct > 0 ? savedPct : calcPct;
+    s.iafPct = calcPct;
     s.iafPts = iafPts;
     s.iafMax = iafMax;
     s.iafTier = IAF_TIERS.find(t => s.iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];

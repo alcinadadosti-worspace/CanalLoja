@@ -843,9 +843,8 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaSkin) { iafPts += Math.min(1, aSkin / metaSkin) * IAF_W.skin; iafMax += IAF_W.skin; }
   if (metas.idCliente && metaID) { iafPts += Math.min(1, aID / metaID) * IAF_W.idCliente; iafMax += IAF_W.idCliente; }
   // Servicos fora do IAF: sem realizado carregado, penalizava quem tinha a meta
-  const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
-  const savedPct = parseFloat(allSellerMetas[name]?.iafSegment) || 0;
-  const iafPct = savedPct > 0 ? savedPct : calcPct;
+  // Segmento ao vivo: muda conforme vendas/indicadores crescem durante o ciclo.
+  const iafPct = iafMax > 0 ? iafPts / iafMax : 0;
   const iafTier = IAF_TIERS.find(t => iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
 
   let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
