@@ -1742,6 +1742,29 @@ function prettyName(s) {
     return w.charAt(0).toUpperCase() + w.slice(1);
   }).join(' ').trim();
 }
+// Apelidos/grafias da comissao -> token presente no nome completo do Resumo.
+// A comissao as vezes usa 2o nome (Alexia, Taciane) ou grafia diferente (Cecilia/Cicilia, Joana/Joanna).
+const CONSULTOR_ALIASES = {
+  'ALEXIA': 'ALEXIA',   // Larissa Alexia
+  'TACIANE': 'TACIANE', // Maria Taciane
+  'CECILIA': 'CICILIA', // Maria Cicilia
+  'JOANA': 'JOANNA',    // Joanna Roberta
+};
+// Resolve nome curto da comissao para a chave canonica (nome completo normalizado) entre `fullNames`.
+function resolveCanonical(commName, fullNames) {
+  const c = normName(commName);
+  if (!c) return null;
+  const ct = (CONSULTOR_ALIASES[c] || c).split(/\s+/).filter(Boolean);
+  if (!ct.length) return null;
+  // 1) prefixo de tokens (mais especifico): "MARIA FERNANDA" -> "MARIA FERNANDA GOMES VIEIRA"
+  let m = fullNames.find(f => { const ft = f.split(/\s+/); return ct.every((t,i) => ft[i] === t); });
+  if (m) return m;
+  // 2) containment: todos os tokens aparecem no nome completo (resolve 2o nome / grafia via alias)
+  m = fullNames.find(f => { const ft = f.split(/\s+/); return ct.every(t => ft.includes(t)); });
+  if (m) return m;
+  // 3) ultimo recurso: primeiro token bate
+  return fullNames.find(f => f.split(/\s+/)[0] === ct[0]) || null;
+}
 function getSheet(wbKey, sheetName) {
   const wb = loadedWorkbooks[wbKey];
   if (!wb) return null;
@@ -4278,9 +4301,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applyServerSellerMetas(pdv) {
     if (!Object.keys(serverSellerMetas).length) return;
+    const fullNames = storesCatalog[pdv] ? Array.from(storesCatalog[pdv].sellers.keys()) : [];
     for (const [name, data] of Object.entries(serverSellerMetas)) {
       if (data.pdv !== pdv) continue;
-      const can = name.toUpperCase();
+      // Casa o nome curto da comissao com o nome completo do Resumo (senao a meta fica orfã -> bolinha branca)
+      const can = resolveCanonical(name, fullNames) || name.toUpperCase();
       if (!metaPerSeller[can]) metaPerSeller[can] = {};
       if (data.receita) metaPerSeller[can].receita = String(Math.round(data.receita));
       if (data.boletoMedio) metaPerSeller[can].boletoMedio = String(Math.round(data.boletoMedio));

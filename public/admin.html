@@ -706,6 +706,13 @@ let adminConsultorData = {};
 function normNameAdmin(s) {
   return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
 }
+// Apelidos/grafias da comissao -> token presente no nome completo do Resumo.
+const CONSULTOR_ALIASES = {
+  'ALEXIA': 'ALEXIA',   // Larissa Alexia
+  'TACIANE': 'TACIANE', // Maria Taciane
+  'CECILIA': 'CICILIA', // Maria Cicilia
+  'JOANA': 'JOANNA',    // Joanna Roberta
+};
 
 async function loadAdminResumo(opts = {}) {
   const verbose = !!opts.verbose;
@@ -769,14 +776,18 @@ async function loadAdminResumo(opts = {}) {
 }
 
 function findConsultorActual(sellerName, pdv) {
-  const shortNorm = normNameAdmin(sellerName);
-  for (const [, data] of Object.entries(adminConsultorData)) {
-    if (data.pdv === pdv && data.name.startsWith(shortNorm + ' ') || data.name === shortNorm) return data;
-  }
-  for (const [, data] of Object.entries(adminConsultorData)) {
-    if (data.pdv === pdv && data.name.startsWith(shortNorm.split(/\s+/)[0] + ' ')) return data;
-  }
-  return null;
+  const c = normNameAdmin(sellerName);
+  const ct = (CONSULTOR_ALIASES[c] || c).split(/\s+/).filter(Boolean);
+  if (!ct.length) return null;
+  const inPdv = Object.values(adminConsultorData).filter(d => d.pdv === pdv);
+  // 1) prefixo de tokens
+  let m = inPdv.find(d => { const ft = d.name.split(/\s+/); return ct.every((t,i) => ft[i] === t); });
+  if (m) return m;
+  // 2) containment: tokens aparecem no nome completo (resolve 2o nome / grafia via alias)
+  m = inPdv.find(d => { const ft = d.name.split(/\s+/); return ct.every(t => ft.includes(t)); });
+  if (m) return m;
+  // 3) ultimo recurso: primeiro token bate
+  return inPdv.find(d => d.name.split(/\s+/)[0] === ct[0]) || null;
 }
 
 function buildAdminSlackMsg(name, metas, pdv) {
