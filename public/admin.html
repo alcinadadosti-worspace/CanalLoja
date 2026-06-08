@@ -757,8 +757,10 @@ async function loadAdminResumo(opts = {}) {
         adminConsultorData[key] = {
           name, pdv,
           receita: nlz(r[2]), boletos: nlz(r[4]), boletoMedio: nlz(r[6]),
-          itensBoleto: nlz(r[10]), turbinado: nlz(r[14])*100,
-          resgate: nlz(r[26])*100, skin: nlz(r[30])*100, idCliente: nlz(r[32]),
+          itensBoleto: nlz(r[10]), turbinado: nlz(r[14])*100, prm: nlz(r[16])*100,
+          // resgate (col 26) e idCliente (col 32) ja vem em %, NAO multiplicar por 100.
+          // skin (R$) nao esta no Resumo — vem do arquivo cuidadosFaciais (preenchido depois).
+          resgate: nlz(r[26]), skin: 0, idCliente: nlz(r[32]),
         };
         parsed++;
       }
@@ -769,10 +771,36 @@ async function loadAdminResumo(opts = {}) {
     } else if (verbose) {
       toast('Aviso: Resumo sem aba CONSULTOR — Slack iria com zeros.');
     }
+    await loadAdminCuidados();
   } catch (e) {
     console.warn('loadAdminResumo:', e);
     if (verbose) toast(`Erro lendo Resumo: ${e.message}`);
   }
+}
+
+// Skin (R$) por consultora vem do arquivo de Cuidados Faciais (CONSULTOR, col 3 = RECEITA R$),
+// nao do Resumo. Preenche adminConsultorData[name_pdv].skin.
+async function loadAdminCuidados() {
+  try {
+    const r = await fetch('/api/files/cuidadosFaciais');
+    if (!r.ok) return;
+    const buf = await r.arrayBuffer();
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); }
+    catch (xe) { console.warn('loadAdminCuidados XLSX.read:', xe); return; }
+    const csName = wb.SheetNames.find(s => s.toUpperCase() === 'CONSULTOR');
+    if (!csName) return;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[csName], { header: 1, defval: '' });
+    const nlz = (v) => { if (v==null||v===''||v==='-') return 0; const n=typeof v==='number'?v:parseFloat(String(v).replace(',','.')); return isNaN(n)?0:n; };
+    for (const row of rows) {
+      const name = normNameAdmin(row[0]);
+      const pdv = String(row[1]||'').trim();
+      if (!name || !/^\d{4,6}$/.test(pdv)) continue;
+      const key = name + '_' + pdv;
+      if (adminConsultorData[key]) adminConsultorData[key].skin = nlz(row[3]);
+      else adminConsultorData[key] = { name, pdv, skin: nlz(row[3]) };
+    }
+  } catch (e) { console.warn('loadAdminCuidados:', e); }
 }
 
 function findConsultorActual(sellerName, pdv) {
@@ -808,6 +836,7 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const aBM = actual.boletoMedio || 0;
   const aItens = actual.itensBoleto || 0;
   const aTurb = actual.turbinado || 0;
+  const aPrm = actual.prm || 0;
   const aResgate = actual.resgate || 0;
   const aID = actual.idCliente || 0;
 
@@ -869,7 +898,7 @@ function buildAdminSlackMsg(name, metas, pdv) {
   msg += `:rocket: AVANCO DOS INDICADORES\n\n`;
 
   if (metaBM) msg += `:receipt: Boleto Medio (Meta: ${fmtR(metaBM)})\n • ${fmtR(aBM)} ${dot(aBM, metaBM)}\n\n`;
-  if (metaPRM) msg += `:repeat: PRM (Meta: ${metaPRM}%)\n • ${fmtPct(0)} ${dot(0, metaPRM)}\n\n`;
+  if (metaPRM) msg += `:repeat: PRM (Meta: ${metaPRM}%)\n • ${fmtPct(aPrm)} ${dot(aPrm, metaPRM)}\n\n`;
   if (metaTurb) msg += `:sparkles: Turbinado (Meta: ${metaTurb}%)\n • ${fmtPct(aTurb)} ${dot(aTurb, metaTurb)}\n\n`;
   if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • 0 ${dot(0, metaSvc)}\n\n`;
   if (metaID) msg += `:iphone: ID Cliente (Meta: ${metaID}%)\n • ${fmtPct(aID)} ${dot(aID, metaID)}\n\n`;
