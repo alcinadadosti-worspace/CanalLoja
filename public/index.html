@@ -2828,6 +2828,17 @@ function parseCycleEnd(periodStr) {
   return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
 }
 
+// Segmento IAF "fecha" no ultimo dia do ciclo (data de fim vem da planilha).
+// Durante o ciclo mostra o nivel travado (do ciclo anterior; Bronze se nao houver).
+// No dia do fim em diante, recalcula ao vivo com o acumulo total -> vira o novo travado.
+function cycleHasEnded() {
+  const end = parseCycleEnd(extractPeriod('resumo'));
+  if (!end) return false;
+  const t = new Date();
+  const today0 = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  return today0 >= end;
+}
+
 // Working days from today (isoDate) to end (Date), counting Mon-Sat (skip Sun)
 function workingDaysUntil(isoDate, endDate) {
   if (!endDate) return null;
@@ -3304,6 +3315,7 @@ function renderDashboard() {
     { min: 0, label: 'Bronze', emoji: '🥉' },
   ];
 
+  const cycleEnded = cycleHasEnded();
   for (const s of sellerScores) {
     const ps = s.ps;
     // Gate por consultora (so conta se ela tem a meta); denominador = meta global (escala % correta).
@@ -3314,9 +3326,11 @@ function renderDashboard() {
     if (metaPerSeller[s.can]?.idCliente && metaID) { iafPts += Math.min(1, ps.idCliente / metaID) * IAF_WEIGHTS.idCliente; iafMax += IAF_WEIGHTS.idCliente; }
     // Servicos fora do IAF: sem realizado carregado, penalizava quem tinha a meta
     const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
-    // Segmento ao vivo: muda conforme vendas/indicadores crescem durante o ciclo.
+    // Durante o ciclo: segmento TRAVADO (lock do ciclo anterior; Bronze=0 se nao houver).
+    // No ultimo dia em diante: recalcula ao vivo com o acumulo total do ciclo.
+    const lockedPct = nlz(metaPerSeller[s.can]?.iafSegment);
     s.iafCalcPct = calcPct;
-    s.iafPct = calcPct;
+    s.iafPct = cycleEnded ? calcPct : lockedPct;
     s.iafPts = iafPts;
     s.iafMax = iafMax;
     s.iafTier = IAF_TIERS.find(t => s.iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
@@ -4315,6 +4329,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // resgate/idCliente: guardados como marcador de existencia para o gate do IAF (valor nao vira denominador)
       if (data.resgate) metaPerSeller[can].resgate = String(data.resgate);
       if (data.idCliente) metaPerSeller[can].idCliente = String(data.idCliente);
+      // segmento travado do ciclo anterior (carry-over) — mostrado durante o ciclo atual
+      if (data.iafSegment != null) metaPerSeller[can].iafSegment = data.iafSegment;
     }
   }
 

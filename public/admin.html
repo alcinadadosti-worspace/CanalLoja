@@ -702,6 +702,15 @@ $('slackStoreSelect').addEventListener('change', renderSlackSellerList);
 
 let adminResumoData = {};
 let adminConsultorData = {};
+let adminCycleEnd = null;  // data de fim do ciclo (da planilha Resumo)
+
+// Segmento IAF fecha no ultimo dia do ciclo; durante o ciclo mostra o nivel travado.
+function cycleHasEnded() {
+  if (!adminCycleEnd) return false;
+  const t = new Date();
+  const today0 = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  return today0 >= adminCycleEnd;
+}
 
 function normNameAdmin(s) {
   return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
@@ -729,6 +738,15 @@ async function loadAdminResumo(opts = {}) {
       console.warn('loadAdminResumo XLSX.read:', xe);
       if (verbose) toast(`Resumo corrompido: ${xe.message}`);
       return;
+    }
+
+    // Data de fim do ciclo (FILTROS -> PERIODO ATUAL: "25/05/2026 - 14/06/2026")
+    const filtros = wb.SheetNames.find(s => s.toUpperCase() === 'FILTROS');
+    if (filtros) {
+      const frows = XLSX.utils.sheet_to_json(wb.Sheets[filtros], { header: 1, defval: '' });
+      const prow = frows.find(r => String(r[0]||'').toUpperCase().includes('PERÍODO ATUAL') || String(r[0]||'').toUpperCase().includes('PERIODO ATUAL'));
+      const m = prow && String(prow[1]||'').match(/-\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      adminCycleEnd = m ? new Date(parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1])) : null;
     }
 
     const pdvSheet = wb.SheetNames.find(s => s === 'PDV');
@@ -872,8 +890,11 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaSkin) { iafPts += Math.min(1, aSkin / metaSkin) * IAF_W.skin; iafMax += IAF_W.skin; }
   if (metas.idCliente && metaID) { iafPts += Math.min(1, aID / metaID) * IAF_W.idCliente; iafMax += IAF_W.idCliente; }
   // Servicos fora do IAF: sem realizado carregado, penalizava quem tinha a meta
-  // Segmento ao vivo: muda conforme vendas/indicadores crescem durante o ciclo.
-  const iafPct = iafMax > 0 ? iafPts / iafMax : 0;
+  const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
+  // Durante o ciclo: nivel TRAVADO (lock do ciclo anterior; Bronze se nao houver).
+  // No ultimo dia do ciclo em diante: ao vivo com o acumulo total -> vira o novo travado.
+  const lockedPct = parseFloat(allSellerMetas[name]?.iafSegment) || 0;
+  const iafPct = cycleHasEnded() ? calcPct : lockedPct;
   const iafTier = IAF_TIERS.find(t => iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
 
   let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
@@ -1082,8 +1103,9 @@ async function autoAssignPdvs() {
 }
 
 $('comConfirmBtn').addEventListener('click', async () => {
-  // Auto-save IAF segments from current cycle before overwriting with new commission
-  if (Object.keys(allSellerMetas).length && Object.keys(adminConsultorData).length) {
+  // Trava o segmento do ciclo que esta acabando (so se o ciclo ja fechou — acumulo total).
+  // Esse valor vira o nivel inicial (carry-over) das consultoras no proximo ciclo.
+  if (cycleHasEnded() && Object.keys(allSellerMetas).length && Object.keys(adminConsultorData).length) {
     const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25 };
     const iafUpdate = {};
     for (const [name, metas] of Object.entries(allSellerMetas)) {
