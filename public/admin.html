@@ -902,16 +902,20 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaTurb) msg += `:sparkles: Turbinado (Meta: ${metaTurb}%)\n • ${fmtPct(aTurb)} ${dot(aTurb, metaTurb)}\n\n`;
   if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • 0 ${dot(0, metaSvc)}\n\n`;
   if (metaID) msg += `:iphone: ID Cliente (Meta: ${metaID}%)\n • ${fmtPct(aID)} ${dot(aID, metaID)}\n\n`;
-  if (metaNPS) {
-    const aNps = parseFloat(String(metas.nps ?? '').replace(',', '.')) || 0;
+  // NPS so aparece se foi digitado manualmente para a consultora (nao vem de planilha).
+  const npsRaw = String(metas.nps ?? '').trim();
+  if (metaNPS && npsRaw !== '') {
+    const aNps = parseFloat(npsRaw.replace(',', '.')) || 0;
     msg += `:mag_right: NPS (Meta: ${metaNPS}%)\n • ${fmtPct(aNps)} ${dot(aNps, metaNPS)}\n\n`;
   }
   if (metaResgate) msg += `:anchor: Resgate (Meta: ${metaResgate}%)\n • ${fmtPct(aResgate)} ${dot(aResgate, metaResgate)}\n\n`;
   if (metaBBX) msg += `:game_die: Desafio BBX (Meta: ${metaBBX}%)\n • 0,00% ${dot(0, metaBBX)}\n\n`;
   if (metaItens) msg += `:package: Itens/Boleto (Meta: ${metaItens})\n • ${aItens.toFixed(2).replace('.',',')} ${dot(aItens, metaItens)}\n\n`;
   if (metaSkin) msg += `:skin-tone-3: Skin (Meta: ${fmtR(metaSkin)})\n • ${fmtR(aSkin)} ${dot(aSkin, metaSkin)}\n\n`;
-  if (metaAudit) {
-    const aAudit = parseFloat(String(allStoreMetas[pdv]?.auditoriaLoja ?? '').replace(',', '.')) || 0;
+  // Auditoria so aparece se foi cadastrada manualmente para a loja (nao vem de planilha).
+  const auditRaw = String(allStoreMetas[pdv]?.auditoriaLoja ?? '').trim();
+  if (metaAudit && auditRaw !== '') {
+    const aAudit = parseFloat(auditRaw.replace(',', '.')) || 0;
     msg += `:clipboard: Auditoria (Meta: ${metaAudit}%)\n • ${fmtPct(aAudit)} ${dot(aAudit, metaAudit)}\n\n`;
   }
 
