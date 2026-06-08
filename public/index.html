@@ -3306,13 +3306,13 @@ function renderDashboard() {
 
   for (const s of sellerScores) {
     const ps = s.ps;
-    const metaSvc = nlz(metaPerSeller[s.can]?.servicos);
+    // Gate por consultora (so conta se ela tem a meta); denominador = meta global (escala % correta).
     let iafPts = 0, iafMax = 0;
     if (s.metaR) { iafPts += Math.min(1, ps.receita / s.metaR) * IAF_WEIGHTS.receita; iafMax += IAF_WEIGHTS.receita; }
-    if (metaResgate) { iafPts += Math.min(1, ps.resgate / metaResgate) * IAF_WEIGHTS.resgate; iafMax += IAF_WEIGHTS.resgate; }
+    if (metaPerSeller[s.can]?.resgate && metaResgate) { iafPts += Math.min(1, ps.resgate / metaResgate) * IAF_WEIGHTS.resgate; iafMax += IAF_WEIGHTS.resgate; }
     if (s.metaS) { iafPts += Math.min(1, ps.skin / s.metaS) * IAF_WEIGHTS.skin; iafMax += IAF_WEIGHTS.skin; }
-    if (metaID) { iafPts += Math.min(1, ps.idCliente / metaID) * IAF_WEIGHTS.idCliente; iafMax += IAF_WEIGHTS.idCliente; }
-    if (metaSvc) { iafPts += Math.min(1, ps.servicos / metaSvc) * IAF_WEIGHTS.servicos; iafMax += IAF_WEIGHTS.servicos; }
+    if (metaPerSeller[s.can]?.idCliente && metaID) { iafPts += Math.min(1, ps.idCliente / metaID) * IAF_WEIGHTS.idCliente; iafMax += IAF_WEIGHTS.idCliente; }
+    // Servicos fora do IAF: sem realizado carregado, penalizava quem tinha a meta
     const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
     const savedPct = nlz(window._serverSellerMetas?.[s.can]?.iafSegment);
     s.iafCalcPct = calcPct;
@@ -4312,6 +4312,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.skin) metaPerSeller[can].skin = String(Math.round(data.skin));
       if (data.servicos) metaPerSeller[can].servicos = String(Math.round(data.servicos));
       if (data.itensBoleto) metaPerSeller[can].itensBoleto = String(data.itensBoleto);
+      // resgate/idCliente: guardados como marcador de existencia para o gate do IAF (valor nao vira denominador)
+      if (data.resgate) metaPerSeller[can].resgate = String(data.resgate);
+      if (data.idCliente) metaPerSeller[can].idCliente = String(data.idCliente);
     }
   }
 
