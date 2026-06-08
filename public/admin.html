@@ -817,20 +817,22 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const metaItens = parseFloat(globalMetas.metaItensBoleto) || 0;
   const metaAudit = parseFloat(globalMetas.metaAuditoria) || 0;
 
-  // IAF tier calculation
-  const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25, servicos: 35 };
+  // IAF tier calculation — cada indicador so conta se a consultora tem meta propria para ele
+  const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25 };
   const IAF_TIERS = [
     { min: 0.95, label: 'Diamante', slack: ':gem:' },
     { min: 0.85, label: 'Ouro', slack: ':first_place_medal:' },
     { min: 0.75, label: 'Prata', slack: ':second_place_medal:' },
     { min: 0, label: 'Bronze', slack: ':third_place_medal:' },
   ];
+  const metaResgateSeller = metas.resgate || 0;
+  const metaIDSeller = metas.idCliente || 0;
   let iafPts = 0, iafMax = 0;
   if (metaReceita) { iafPts += Math.min(1, aRec / metaReceita) * IAF_W.receita; iafMax += IAF_W.receita; }
-  if (metaResgate) { iafPts += Math.min(1, aResgate / metaResgate) * IAF_W.resgate; iafMax += IAF_W.resgate; }
+  if (metaResgateSeller) { iafPts += Math.min(1, aResgate / metaResgateSeller) * IAF_W.resgate; iafMax += IAF_W.resgate; }
   if (metaSkin) { iafPts += Math.min(1, aSkin / metaSkin) * IAF_W.skin; iafMax += IAF_W.skin; }
-  if (metaID) { iafPts += Math.min(1, aID / metaID) * IAF_W.idCliente; iafMax += IAF_W.idCliente; }
-  if (metaSvc) { iafMax += IAF_W.servicos; }
+  if (metaIDSeller) { iafPts += Math.min(1, aID / metaIDSeller) * IAF_W.idCliente; iafMax += IAF_W.idCliente; }
+  // Servicos fora do IAF: sem realizado carregado, penalizava quem tinha a meta
   const calcPct = iafMax > 0 ? iafPts / iafMax : 0;
   const savedPct = parseFloat(allSellerMetas[name]?.iafSegment) || 0;
   const iafPct = savedPct > 0 ? savedPct : calcPct;
@@ -1040,19 +1042,17 @@ async function autoAssignPdvs() {
 $('comConfirmBtn').addEventListener('click', async () => {
   // Auto-save IAF segments from current cycle before overwriting with new commission
   if (Object.keys(allSellerMetas).length && Object.keys(adminConsultorData).length) {
-    const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25, servicos: 35 };
+    const IAF_W = { receita: 100, resgate: 25, skin: 25, idCliente: 25 };
     const iafUpdate = {};
     for (const [name, metas] of Object.entries(allSellerMetas)) {
       if (SKIP_NAMES.test(name) || !metas.pdv || !/^\d{4,6}$/.test(metas.pdv)) continue;
       const actual = findConsultorActual(name, metas.pdv) || {};
       let pts = 0, max = 0;
       if (metas.receita) { pts += Math.min(1, (actual.receita||0) / metas.receita) * IAF_W.receita; max += IAF_W.receita; }
-      const mr = parseFloat(globalMetas.metaResgate) || 0;
-      if (mr) { pts += Math.min(1, (actual.resgate||0) / mr) * IAF_W.resgate; max += IAF_W.resgate; }
+      if (metas.resgate) { pts += Math.min(1, (actual.resgate||0) / metas.resgate) * IAF_W.resgate; max += IAF_W.resgate; }
       if (metas.skin) { pts += Math.min(1, (actual.skin||0) / metas.skin) * IAF_W.skin; max += IAF_W.skin; }
-      const mi = parseFloat(globalMetas.metaID) || 0;
-      if (mi) { pts += Math.min(1, (actual.idCliente||0) / mi) * IAF_W.idCliente; max += IAF_W.idCliente; }
-      if (metas.servicos) { max += IAF_W.servicos; }
+      if (metas.idCliente) { pts += Math.min(1, (actual.idCliente||0) / metas.idCliente) * IAF_W.idCliente; max += IAF_W.idCliente; }
+      // Servicos fora do IAF (sem realizado); resgate/ID so para quem tem meta propria
       const pct = max > 0 ? pts / max : 0;
       iafUpdate[name] = { iafSegment: pct };
     }
