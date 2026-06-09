@@ -13,7 +13,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       # Senha do acesso único (vê tudo). Opcional sobrescrever; sem essa var
-      # usa a padrão "canalloja". Gere com `npm run hash -- <senha>`.
+      # usa a padrão "7766". Gere com `npm run hash -- <senha>`.
       - key: USER_EQUIPE_HASH
         sync: false
       # Senha mestra do Admin (sobe planilhas). Default = "admin".

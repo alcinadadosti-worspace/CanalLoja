@@ -3,12 +3,12 @@
 // Acesso ÚNICO: o login pede só uma senha (sem usuário) e mostra tudo.
 // O "administrativo" continua à parte (página admin.html + senha mestra, ver config/admin.js).
 //
-// Senha padrão = "canalloja". Para trocar em produção sem mexer no código,
+// Senha padrão = "7766". Para trocar em produção sem mexer no código,
 // defina a ENV var USER_EQUIPE_HASH — ela tem prioridade sobre o hash daqui.
 // Use `npm run hash -- <novaSenha>` para gerar um novo hash.
 
 const DEFAULT_HASHES = {
-  equipe: '$2a$10$Rj.HLABIpToaAenDC636he3x0v3Ig9W3dc/kX9ofLoVkGDI0HXiji',
+  equipe: '$2a$10$PYa0gbX6aNVqaWz9/z4HvuQ5tjqGVz22TA7x3hlSl4gueMp6W0zaW',
 };
 
 function hashFor(username) {
