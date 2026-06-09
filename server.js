@@ -85,13 +85,16 @@ app.get('/health', (req, res) => {
 
 // ---------- API ----------
 app.post('/api/login', loginRateLimit, async (req, res) => {
-  const { username, password } = req.body || {};
-  const u = USERS[(username || '').toLowerCase().trim()];
-  if (!u) return res.status(401).json({ error: 'invalid_credentials' });
-  const ok = await bcrypt.compare(password || '', u.passwordHash);
-  if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
-  setCookie(res, u.username);
-  res.json(publicProfile(u.username));
+  // Login só com senha (sem usuário): confere a senha contra os acessos
+  // cadastrados e entra como o primeiro que casar.
+  const { password } = req.body || {};
+  for (const u of Object.values(USERS)) {
+    if (await bcrypt.compare(password || '', u.passwordHash)) {
+      setCookie(res, u.username);
+      return res.json(publicProfile(u.username));
+    }
+  }
+  return res.status(401).json({ error: 'invalid_credentials' });
 });
 
 app.post('/api/logout', (req, res) => {

@@ -98,12 +98,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   <form id="loginForm" autocomplete="off">
     <div class="field">
-      <label for="u">Usuário</label>
-      <input id="u" type="text" autocomplete="username" autofocus required>
-    </div>
-    <div class="field">
       <label for="p">Senha</label>
-      <input id="p" type="password" autocomplete="current-password" required>
+      <input id="p" type="password" autocomplete="current-password" autofocus required>
     </div>
     <button type="submit" id="submitBtn">Entrar</button>
     <div class="error" id="error"></div>
@@ -131,7 +127,6 @@ form.addEventListener('submit', async (e) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: document.getElementById('u').value,
         password: document.getElementById('p').value,
       }),
     });

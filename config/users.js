@@ -1,16 +1,14 @@
 // Configuração de usuários e papéis (roles).
 //
-// Cada usuária tem: name (exibição), role, passwordHash (bcrypt).
-// Senha padrão = primeiro nome em minúsculo (ex: "leidiane").
-// Para trocar uma senha em produção sem alterar o código, defina a ENV var
-// correspondente (USER_<USERNAME>_HASH) — ela tem prioridade sobre o hash daqui.
+// Acesso ÚNICO: o login pede só uma senha (sem usuário) e mostra tudo.
+// O "administrativo" continua à parte (página admin.html + senha mestra, ver config/admin.js).
+//
+// Senha padrão = "canalloja". Para trocar em produção sem mexer no código,
+// defina a ENV var USER_EQUIPE_HASH — ela tem prioridade sobre o hash daqui.
 // Use `npm run hash -- <novaSenha>` para gerar um novo hash.
 
 const DEFAULT_HASHES = {
-  leidiane: '$2a$10$IfezCOM6AMk8YzH/chYDqeDRY6y90zTIpvpawJeHApsw2dTTidQLW',
-  taciane:  '$2a$10$IKMtErGDQs8aHEGxBLeqkesj6al.ljNkEOueWa5ZAb3j5.T5Qg9i6',
-  kemilly:  '$2a$10$lU3ZBXXNcSh3uxsjad08weL0O3ouf5Fq2sh21Igi1i1pXzocQkN/a',
-  mariane:  '$2a$10$BTxBYkjCcmeXOodtGsVO9eGRovzt1pNTLMgQGmvD0dCfDXpqp/2EG',
+  equipe: '$2a$10$Rj.HLABIpToaAenDC636he3x0v3Ig9W3dc/kX9ofLoVkGDI0HXiji',
 };
 
 function hashFor(username) {
@@ -18,60 +16,24 @@ function hashFor(username) {
 }
 
 const USERS = {
-  leidiane: { username: 'leidiane', name: 'Leidiane Souza',    role: 'master',    passwordHash: hashFor('leidiane') },
-  taciane:  { username: 'taciane',  name: 'Maria Taciane',     role: 'hub_sul',   passwordHash: hashFor('taciane')  },
-  kemilly:  { username: 'kemilly',  name: 'Kemilly Rafaelly',  role: 'hub_norte', passwordHash: hashFor('kemilly')  },
-  mariane:  { username: 'mariane',  name: 'Mariane Santos Sousa', role: 'digital',   passwordHash: hashFor('mariane')  },
+  equipe: { username: 'equipe', name: 'Canal Loja', role: 'master', passwordHash: hashFor('equipe') },
 };
 
 // Mesma estrutura é usada no servidor (filtrar APIs) e enviada ao cliente
 // (filtrar UI). Mantenha as duas em sincronia se editar.
 const ROLES = {
+  // Acesso único: vê todas as abas e todos os PDVs. O administrativo (upload de
+  // planilhas + metas globais) fica na Área Admin, protegida por senha mestra.
   master: {
-    label: 'Master',
+    label: 'Acesso geral',
     allowedPdvs: '*',
     tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos', 'digital'],
     sections: ['dashboard'],
     editable: {
       global:  ['metaPRM', 'metaTurbinado', 'metaID', 'metaResgate', 'metaBBX'],
-      hub:     [],
-      digital: [],
-    },
-  },
-  hub_sul: {
-    label: 'Hub Sul (Penedo · Coruripe · Teotônio)',
-    allowedPdvs: ['24669', '24670', '24671'],
-    tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos'],
-    sections: ['dashboard'],
-    editable: {
-      global:  [],
       hub:     ['metaSkinLoja', 'metaNPS', 'metaItensBoleto', 'metaAuditoria',
                 'metaReceitaLoja', 'metaBoleto', 'npsLoja', 'auditoriaLoja',
                 'sellerMetas'],
-      digital: [],
-    },
-  },
-  hub_norte: {
-    label: 'Hub Norte (Sustentável · Palmeira · São Sebastião)',
-    allowedPdvs: ['24617', '24668', '24303'],
-    tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos'],
-    sections: ['dashboard'],
-    editable: {
-      global:  [],
-      hub:     ['metaSkinLoja', 'metaNPS', 'metaItensBoleto', 'metaAuditoria',
-                'metaReceitaLoja', 'metaBoleto', 'npsLoja', 'auditoriaLoja',
-                'sellerMetas'],
-      digital: [],
-    },
-  },
-  digital: {
-    label: 'Canal Loja Digital',
-    allowedPdvs: '*',
-    tabs: ['digital'],
-    sections: ['dashboard'],
-    editable: {
-      global:  [],
-      hub:     [],
       digital: ['metaDigitalReceita', 'metaDigitalConversao', 'metaDigitalBM'],
     },
   },

@@ -12,15 +12,9 @@ services:
         value: production
       - key: JWT_SECRET
         generateValue: true
-      # Senhas: opcional sobrescrever. Sem essas vars, usa senhas-padrão
-      # (primeiro nome em minúsculo). Gere com `npm run hash -- <senha>`.
-      - key: USER_LEIDIANE_HASH
-        sync: false
-      - key: USER_TACIANE_HASH
-        sync: false
-      - key: USER_KEMILLY_HASH
-        sync: false
-      - key: USER_MARIANE_HASH
+      # Senha do acesso único (vê tudo). Opcional sobrescrever; sem essa var
+      # usa a padrão "canalloja". Gere com `npm run hash -- <senha>`.
+      - key: USER_EQUIPE_HASH
         sync: false
       # Senha mestra do Admin (sobe planilhas). Default = "admin".
       # Gere com `npm run hash -- <senha>` e cole aqui.
