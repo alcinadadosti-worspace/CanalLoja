@@ -311,8 +311,8 @@ section {
           <option value="24617">Sustentavel (24617)</option>
           <option value="24668">Palmeira (24668)</option>
           <option value="24669">Penedo (24669)</option>
-          <option value="24670">Teotonio (24670)</option>
-          <option value="24671">Coruripe (24671)</option>
+          <option value="24670">Coruripe (24670)</option>
+          <option value="24671">Teotonio (24671)</option>
         </select>
       </div>
 
@@ -608,10 +608,10 @@ $('resetMetas').addEventListener('click', () => {
 });
 
 // ---------- Slack por Loja ----------
-const LOJA_NAMES = { '24303':'Sao Sebastiao','24617':'Sustentavel','24668':'Palmeira','24669':'Penedo','24670':'Teotonio','24671':'Coruripe' };
+const LOJA_NAMES = { '24303':'Sao Sebastiao','24617':'Sustentavel','24668':'Palmeira','24669':'Penedo','24670':'Coruripe','24671':'Teotonio' };
 const SLACK_IDS = {
   _default: 'U0895CZ8HU7', // Eduardo (teste / fallback)
-  // Coruripe (24671)
+  // Coruripe (24670)
   'ANA PAULA': 'U087E6YNPRD',
   'BRUNA': 'U08NLNHF29G',
   // Digital
@@ -630,7 +630,7 @@ const SLACK_IDS = {
   // Sustentavel Palmeira (24617)
   'EDUARDA': 'U0AKMS2LNEA',
   'ALEXIA': 'U0ALX1EJUC8',         // Larissa Alexia da Silva Souza
-  // Teotonio Vilela (24670)
+  // Teotonio Vilela (24671)
   'CAMILLE': 'U09JGAFFZB6',
   'ELIENE': 'U087P8JF97F',
   'JOSENILDO': 'U0ASY08QHTN',      // JÚNIOR é mesclado para JOSENILDO no import
@@ -703,6 +703,7 @@ $('slackStoreSelect').addEventListener('change', renderSlackSellerList);
 let adminResumoData = {};
 let adminConsultorData = {};
 let adminCycleEnd = null;  // data de fim do ciclo (da planilha Resumo)
+let adminBbxByPdv = {};    // penetracao do Desafio BBX por loja (planilha bbx)
 
 // Segmento IAF fecha no ultimo dia do ciclo; durante o ciclo mostra o nivel travado.
 function cycleHasEnded() {
@@ -790,6 +791,8 @@ async function loadAdminResumo(opts = {}) {
       toast('Aviso: Resumo sem aba CONSULTOR — Slack iria com zeros.');
     }
     await loadAdminCuidados();
+    await loadAdminServicos();
+    await loadAdminBbx();
   } catch (e) {
     console.warn('loadAdminResumo:', e);
     if (verbose) toast(`Erro lendo Resumo: ${e.message}`);
@@ -821,6 +824,58 @@ async function loadAdminCuidados() {
   } catch (e) { console.warn('loadAdminCuidados:', e); }
 }
 
+// Servicos realizados por consultora: soma da aba CONSULTOR do arquivo servicosRealizados
+// (col 0 = PDV, col 1 = nome, col 5 = quantidade). Preenche adminConsultorData[name_pdv].servicos.
+async function loadAdminServicos() {
+  try {
+    const r = await fetch('/api/files/servicosRealizados');
+    if (!r.ok) return;
+    const buf = await r.arrayBuffer();
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); }
+    catch (xe) { console.warn('loadAdminServicos XLSX.read:', xe); return; }
+    const csName = wb.SheetNames.find(s => s.toUpperCase() === 'CONSULTOR');
+    if (!csName) return;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[csName], { header: 1, defval: '' });
+    const totals = {}, info = {};
+    for (const row of rows) {
+      const pdv = String(row[0]||'').trim();
+      const name = normNameAdmin(row[1]);
+      if (!name || !/^\d{4,6}$/.test(pdv)) continue;
+      const qty = typeof row[5]==='number' ? row[5] : parseFloat(String(row[5]).replace(',','.'));
+      if (isNaN(qty)) continue;
+      const key = name + '_' + pdv;
+      totals[key] = (totals[key] || 0) + qty;
+      info[key] = { name, pdv };
+    }
+    for (const [key, total] of Object.entries(totals)) {
+      if (adminConsultorData[key]) adminConsultorData[key].servicos = total;
+      else adminConsultorData[key] = { ...info[key], servicos: total };
+    }
+  } catch (e) { console.warn('loadAdminServicos:', e); }
+}
+
+// Penetracao do Desafio BBX por loja (planilha bbx, aba PDV, col 3 = fracao 0-1).
+async function loadAdminBbx() {
+  try {
+    const r = await fetch('/api/files/bbx');
+    if (!r.ok) return;
+    const buf = await r.arrayBuffer();
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); }
+    catch (xe) { console.warn('loadAdminBbx XLSX.read:', xe); return; }
+    const sn = wb.SheetNames.find(s => s.toUpperCase() === 'PDV');
+    if (!sn) return;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' });
+    for (const row of rows) {
+      const pdv = String(row[0]||'').trim();
+      if (!/^\d{4,6}$/.test(pdv)) continue;
+      const v = typeof row[3]==='number' ? row[3] : parseFloat(String(row[3]).replace(',','.'));
+      if (!isNaN(v)) adminBbxByPdv[pdv] = v * 100;
+    }
+  } catch (e) { console.warn('loadAdminBbx:', e); }
+}
+
 function findConsultorActual(sellerName, pdv) {
   const c = normNameAdmin(sellerName);
   const ct = (CONSULTOR_ALIASES[c] || c).split(/\s+/).filter(Boolean);
@@ -843,9 +898,12 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const dot = (atual, meta) => meta > 0 ? (atual/meta >= 1 ? ':large_green_circle:' : atual/meta >= 0.5 ? ':large_yellow_circle:' : ':red_circle:') : ':red_circle:';
   const today = new Date();
   const fmtDate = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  // Meta diaria considera os dias uteis (seg-sab) ate o FIM DO CICLO (planilha Resumo);
+  // sem data de ciclo, cai no fim do mes. Compara em meia-noite p/ incluir o ultimo dia.
+  const today0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const fimPrazo = adminCycleEnd || new Date(today.getFullYear(), today.getMonth() + 1, 0);
   let diasUteis = 0;
-  for (let d = new Date(today); d <= endOfMonth; d.setDate(d.getDate() + 1)) { if (d.getDay() !== 0) diasUteis++; }
+  for (let d = new Date(today0); d <= fimPrazo; d.setDate(d.getDate() + 1)) { if (d.getDay() !== 0) diasUteis++; }
   if (diasUteis < 1) diasUteis = 1;
 
   const actual = findConsultorActual(name, pdv) || {};
@@ -857,6 +915,8 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const aPrm = actual.prm || 0;
   const aResgate = actual.resgate || 0;
   const aID = actual.idCliente || 0;
+  const aSvc = actual.servicos || 0;
+  const aBBX = adminBbxByPdv[pdv] || 0;
 
   const metaReceita = metas.receita || 0;
   const metaSkin = metas.skin || 0;
@@ -921,7 +981,7 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (metaBM) msg += `:receipt: Boleto Medio (Meta: ${fmtR(metaBM)})\n • ${fmtR(aBM)} ${dot(aBM, metaBM)}\n\n`;
   if (metaPRM) msg += `:repeat: PRM (Meta: ${metaPRM}%)\n • ${fmtPct(aPrm)} ${dot(aPrm, metaPRM)}\n\n`;
   if (metaTurb) msg += `:sparkles: Turbinado (Meta: ${metaTurb}%)\n • ${fmtPct(aTurb)} ${dot(aTurb, metaTurb)}\n\n`;
-  if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • 0 ${dot(0, metaSvc)}\n\n`;
+  if (metaSvc) msg += `:woman-getting-haircut: Servicos (Meta: ${Math.round(metaSvc)})\n • ${Math.round(aSvc)} ${dot(aSvc, metaSvc)}\n\n`;
   if (metaID) msg += `:iphone: ID Cliente (Meta: ${metaID}%)\n • ${fmtPct(aID)} ${dot(aID, metaID)}\n\n`;
   // NPS so aparece se foi digitado manualmente para a consultora (nao vem de planilha).
   const npsRaw = String(metas.nps ?? '').trim();
@@ -930,7 +990,7 @@ function buildAdminSlackMsg(name, metas, pdv) {
     msg += `:mag_right: NPS (Meta: ${metaNPS}%)\n • ${fmtPct(aNps)} ${dot(aNps, metaNPS)}\n\n`;
   }
   if (metaResgate) msg += `:anchor: Resgate (Meta: ${metaResgate}%)\n • ${fmtPct(aResgate)} ${dot(aResgate, metaResgate)}\n\n`;
-  if (metaBBX) msg += `:game_die: Desafio BBX (Meta: ${metaBBX}%)\n • 0,00% ${dot(0, metaBBX)}\n\n`;
+  if (metaBBX) msg += `:game_die: Desafio BBX (Meta: ${metaBBX}%)\n • ${fmtPct(aBBX)} ${dot(aBBX, metaBBX)}\n\n`;
   if (metaItens) msg += `:package: Itens/Boleto (Meta: ${metaItens})\n • ${aItens.toFixed(2).replace('.',',')} ${dot(aItens, metaItens)}\n\n`;
   if (metaSkin) msg += `:skin-tone-3: Skin (Meta: ${fmtR(metaSkin)})\n • ${fmtR(aSkin)} ${dot(aSkin, metaSkin)}\n\n`;
   // Auditoria so aparece se foi cadastrada manualmente para a loja (nao vem de planilha).
@@ -991,7 +1051,7 @@ $('slackSendAllBtn').addEventListener('click', async () => {
 // ---------- Import Comissao ----------
 const STORE_OPTIONS = {
   '24303': 'Sao Sebastiao', '24617': 'Sustentavel', '24668': 'Palmeira',
-  '24669': 'Penedo', '24670': 'Teotonio', '24671': 'Coruripe',
+  '24669': 'Penedo', '24670': 'Coruripe', '24671': 'Teotonio',
   'digital': 'Digital', 'gerente_norte': 'Gerente Norte', 'gerente_sul': 'Gerente Sul', 'gerente_digital': 'Gerente Digital',
 };
 const COM_VAR_MAP = {
