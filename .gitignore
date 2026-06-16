@@ -25,6 +25,10 @@ npm-debug.log*
 
 # Scripts temporários de inspeção
 _*.py
+_*.js
+
+# Backups de metas (dados reais — não versionar)
+backups/
 
 # Logs / saídas
 *.log
