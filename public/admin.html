@@ -891,6 +891,34 @@ function findConsultorActual(sellerName, pdv) {
   return inPdv.find(d => d.name.split(/\s+/)[0] === ct[0]) || null;
 }
 
+// Consultoras cadastradas em mais de uma loja: o Resumo traz o realizado SEPARADO
+// por PDV, mas a extranet (fonte correta) mostra as lojas SOMADAS. Aqui somamos as
+// linhas das lojas pra mensagem bater com a extranet. Chave = nome canonico do Resumo.
+const CROSS_STORE_CONSULTORES = {
+  'MARIA CICILIA BRITO VEIGA': ['24617', '24668'],  // Palmeira Sustentavel + Palmeira
+};
+
+// Soma as linhas de varias lojas de uma mesma consultora: R$/qtd somados,
+// taxas (BM, itens, turbinado, PRM, resgate, ID) ponderadas por boletos.
+function aggregateConsultor(canonName, pdvs) {
+  const rows = pdvs.map(p => adminConsultorData[canonName + '_' + p]).filter(Boolean);
+  if (rows.length <= 1) return rows[0] || null;
+  let receita=0, boletos=0, skin=0, servicos=0, itensW=0, turbW=0, prmW=0, resgW=0, idW=0;
+  for (const d of rows) {
+    const b = d.boletos || 0;
+    receita += d.receita||0; boletos += b; skin += d.skin||0; servicos += d.servicos||0;
+    itensW += (d.itensBoleto||0)*b; turbW += (d.turbinado||0)*b;
+    prmW += (d.prm||0)*b; resgW += (d.resgate||0)*b; idW += (d.idCliente||0)*b;
+  }
+  const wavg = x => boletos > 0 ? x/boletos : 0;
+  return {
+    name: rows[0].name, pdv: rows[0].pdv, receita, boletos, skin, servicos,
+    boletoMedio: boletos > 0 ? receita/boletos : 0,
+    itensBoleto: wavg(itensW), turbinado: wavg(turbW), prm: wavg(prmW),
+    resgate: wavg(resgW), idCliente: wavg(idW),
+  };
+}
+
 function buildAdminSlackMsg(name, metas, pdv) {
   const store = LOJA_NAMES[pdv] || pdv;
   const fmtR = (v) => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
@@ -906,7 +934,10 @@ function buildAdminSlackMsg(name, metas, pdv) {
   for (let d = new Date(today0); d <= fimPrazo; d.setDate(d.getDate() + 1)) { if (d.getDay() !== 0) diasUteis++; }
   if (diasUteis < 1) diasUteis = 1;
 
-  const actual = findConsultorActual(name, pdv) || {};
+  let actual = findConsultorActual(name, pdv) || {};
+  // Cross-store: se a consultora atua em mais de uma loja, soma as lojas (= extranet)
+  const crossPdvs = actual.name && CROSS_STORE_CONSULTORES[actual.name];
+  if (crossPdvs) actual = aggregateConsultor(actual.name, crossPdvs) || actual;
   const aRec = actual.receita || 0;
   const aSkin = actual.skin || 0;
   const aBM = actual.boletoMedio || 0;
