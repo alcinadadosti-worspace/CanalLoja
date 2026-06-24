@@ -618,7 +618,7 @@ const SLACK_IDS = {
   'ANNY': 'U08JFCGBFSA',
   // Palmeira (24668)
   'CECÍLIA': 'U0AL2NDNH09',       // Maria Cicília Brito Veiga
-  'VALESCA': 'U087M7GCNMC',
+  // VALESCA removida (24/06/2026): desligada — nao trabalha mais, sem disparo
   'YASMIN': 'U0A5YLESW1E',
   // Penedo (24669)
   'DEISE': 'U092FQKNFPB',
@@ -653,7 +653,7 @@ async function loadGlobalMetasForSlack() {
   } catch {}
 }
 
-const SKIP_NAMES = /^(GERENTE|LEIDIANE|TOTAL|RECEITA)/i;
+const SKIP_NAMES = /^(GERENTE|LEIDIANE|VALESCA|TOTAL|RECEITA)/i;
 
 function renderSlackSellerList() {
   const pdv = $('slackStoreSelect').value;
