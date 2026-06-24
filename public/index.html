@@ -1744,26 +1744,34 @@ function prettyName(s) {
 }
 // Apelidos/grafias da comissao -> token presente no nome completo do Resumo.
 // A comissao as vezes usa 2o nome (Alexia, Taciane) ou grafia diferente (Cecilia/Cicilia, Joana/Joanna).
+// Valor pode ser string (1 grafia) ou array (varias grafias possiveis no Resumo).
 const CONSULTOR_ALIASES = {
   'ALEXIA': 'ALEXIA',   // Larissa Alexia
   'TACIANE': 'TACIANE', // Maria Taciane
   'CECILIA': 'CICILIA', // Maria Cicilia
   'JOANA': 'JOANNA',    // Joanna Roberta
+  'TAINA': ['TAINA', 'TAYNA'], // cadastro TAINÁ casa com "Tainá" OU "Tayná" no Resumo
 };
 // Resolve nome curto da comissao para a chave canonica (nome completo normalizado) entre `fullNames`.
 function resolveCanonical(commName, fullNames) {
   const c = normName(commName);
   if (!c) return null;
-  const ct = (CONSULTOR_ALIASES[c] || c).split(/\s+/).filter(Boolean);
-  if (!ct.length) return null;
-  // 1) prefixo de tokens (mais especifico): "MARIA FERNANDA" -> "MARIA FERNANDA GOMES VIEIRA"
-  let m = fullNames.find(f => { const ft = f.split(/\s+/); return ct.every((t,i) => ft[i] === t); });
-  if (m) return m;
-  // 2) containment: todos os tokens aparecem no nome completo (resolve 2o nome / grafia via alias)
-  m = fullNames.find(f => { const ft = f.split(/\s+/); return ct.every(t => ft.includes(t)); });
-  if (m) return m;
-  // 3) ultimo recurso: primeiro token bate
-  return fullNames.find(f => f.split(/\s+/)[0] === ct[0]) || null;
+  const aliasVal = CONSULTOR_ALIASES[c] || c;
+  const candidates = Array.isArray(aliasVal) ? aliasVal : [aliasVal];  // tenta cada grafia possivel
+  for (const cand of candidates) {
+    const ct = String(cand).split(/\s+/).filter(Boolean);
+    if (!ct.length) continue;
+    // 1) prefixo de tokens (mais especifico): "MARIA FERNANDA" -> "MARIA FERNANDA GOMES VIEIRA"
+    let m = fullNames.find(f => { const ft = f.split(/\s+/); return ct.every((t,i) => ft[i] === t); });
+    if (m) return m;
+    // 2) containment: todos os tokens aparecem no nome completo (resolve 2o nome / grafia via alias)
+    m = fullNames.find(f => { const ft = f.split(/\s+/); return ct.every(t => ft.includes(t)); });
+    if (m) return m;
+    // 3) ultimo recurso: primeiro token bate
+    m = fullNames.find(f => f.split(/\s+/)[0] === ct[0]);
+    if (m) return m;
+  }
+  return null;
 }
 function getSheet(wbKey, sheetName) {
   const wb = loadedWorkbooks[wbKey];
