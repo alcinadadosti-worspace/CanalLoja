@@ -3417,16 +3417,20 @@ function renderDashboard() {
 
   $('dashSellers').innerHTML = sellersHtml;
 
-  // Store seller data for Slack sending (individual DMs)
-  const today = new Date();
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  let diasRestantes = 0;
-  for (let d = new Date(today); d <= endOfMonth; d.setDate(d.getDate() + 1)) {
-    const dow = d.getDay();
-    if (dow !== 0) diasRestantes++;
+  // Store seller data for Slack sending (individual DMs).
+  // Meta diária e data usam a MESMA base do relatório de texto: data selecionada +
+  // dias úteis até o FIM DO CICLO (não fim do mês). Antes divergia do texto/admin.
+  const reportDateStr = $('reportDate').value;
+  let diasRestantes = parseInt($('diasRestantes').value, 10);
+  if (!diasRestantes || diasRestantes < 1) {
+    const cycleEnd = parseCycleEnd(extractPeriod('resumo'));
+    if (cycleEnd && reportDateStr) diasRestantes = workingDaysUntil(reportDateStr, cycleEnd);
+    if ((!diasRestantes || diasRestantes < 1) && reportDateStr) diasRestantes = workingDaysLeft(reportDateStr);
   }
-  if (diasRestantes < 1) diasRestantes = 1;
-  const fmtDate = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
+  if (!diasRestantes || diasRestantes < 1) diasRestantes = 1;
+  const fmtDate = reportDateStr
+    ? `${reportDateStr.slice(8,10)}/${reportDateStr.slice(5,7)}/${reportDateStr.slice(0,4)}`
+    : (() => { const t = new Date(); return `${String(t.getDate()).padStart(2,'0')}/${String(t.getMonth()+1).padStart(2,'0')}/${t.getFullYear()}`; })();
   const slackDot = (pct) => pct >= 1 ? ':large_green_circle:' : pct >= 0.5 ? ':large_yellow_circle:' : pct > 0 ? ':red_circle:' : ':red_circle:';
   const faltando = (meta, atual) => meta > 0 ? Math.max(0, meta - atual) : 0;
 

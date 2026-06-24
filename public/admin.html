@@ -704,7 +704,8 @@ let adminResumoData = {};
 let adminConsultorData = {};
 let adminCycleEnd = null;    // data de fim do ciclo (da planilha Resumo)
 let adminCycleStart = null;  // data de inicio do ciclo (usada pra filtrar Servicos por data)
-let adminBbxByPdv = {};    // penetracao do Desafio BBX por loja (planilha bbx)
+let adminBbxByPdv = {};    // penetracao do Desafio BBX por loja (planilha bbx, aba PDV)
+let adminBbxByName = {};   // penetracao do Desafio BBX por consultora (aba Consultor) — fonte correta no DM
 
 // Segmento IAF fecha no ultimo dia do ciclo; durante o ciclo mostra o nivel travado.
 function cycleHasEnded() {
@@ -890,13 +891,27 @@ async function loadAdminBbx() {
     try { wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); }
     catch (xe) { console.warn('loadAdminBbx XLSX.read:', xe); return; }
     const sn = wb.SheetNames.find(s => s.toUpperCase() === 'PDV');
-    if (!sn) return;
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' });
-    for (const row of rows) {
-      const pdv = String(row[0]||'').trim();
-      if (!/^\d{4,6}$/.test(pdv)) continue;
-      const v = typeof row[3]==='number' ? row[3] : parseFloat(String(row[3]).replace(',','.'));
-      if (!isNaN(v)) adminBbxByPdv[pdv] = v * 100;
+    if (sn) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' });
+      for (const row of rows) {
+        const pdv = String(row[0]||'').trim();
+        if (!/^\d{4,6}$/.test(pdv)) continue;
+        const v = typeof row[3]==='number' ? row[3] : parseFloat(String(row[3]).replace(',','.'));
+        if (!isNaN(v)) adminBbxByPdv[pdv] = v * 100;
+      }
+    }
+    // BBX por consultora (aba Consultor, col 0 = nome, col 3 = fracao 0-1). O index
+    // usa esse valor por consultora; sem ele, o DM mandava o BBX da loja inteira.
+    const cn = wb.SheetNames.find(s => s.toUpperCase() === 'CONSULTOR');
+    if (cn) {
+      adminBbxByName = {};
+      const crows = XLSX.utils.sheet_to_json(wb.Sheets[cn], { header: 1, defval: '' });
+      for (const row of crows) {
+        const name = normNameAdmin(row[0]);
+        if (!name) continue;
+        const v = typeof row[3]==='number' ? row[3] : parseFloat(String(row[3]).replace(',','.'));
+        if (!isNaN(v)) adminBbxByName[name] = v * 100;
+      }
     }
   } catch (e) { console.warn('loadAdminBbx:', e); }
 }
@@ -972,7 +987,10 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const aResgate = actual.resgate || 0;
   const aID = actual.idCliente || 0;
   const aSvc = actual.servicos || 0;
-  const aBBX = adminBbxByPdv[pdv] || 0;
+  // BBX da CONSULTORA (aba Consultor); cai no valor da loja só se ela não tiver linha própria
+  const aBBX = (actual.name && adminBbxByName[actual.name] != null)
+    ? adminBbxByName[actual.name]
+    : (adminBbxByPdv[pdv] || 0);
 
   const metaReceita = metas.receita || 0;
   const metaSkin = metas.skin || 0;
