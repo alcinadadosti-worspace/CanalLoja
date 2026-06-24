@@ -702,7 +702,8 @@ $('slackStoreSelect').addEventListener('change', renderSlackSellerList);
 
 let adminResumoData = {};
 let adminConsultorData = {};
-let adminCycleEnd = null;  // data de fim do ciclo (da planilha Resumo)
+let adminCycleEnd = null;    // data de fim do ciclo (da planilha Resumo)
+let adminCycleStart = null;  // data de inicio do ciclo (usada pra filtrar Servicos por data)
 let adminBbxByPdv = {};    // penetracao do Desafio BBX por loja (planilha bbx)
 
 // Segmento IAF fecha no ultimo dia do ciclo; durante o ciclo mostra o nivel travado.
@@ -711,6 +712,27 @@ function cycleHasEnded() {
   const t = new Date();
   const today0 = new Date(t.getFullYear(), t.getMonth(), t.getDate());
   return today0 >= adminCycleEnd;
+}
+
+// Normaliza a DATA REALIZACAO de Servicos (Date | ISO | DD/MM/YYYY | serial Excel) -> Date|null.
+function parseSvcDate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'number') {  // serial Excel (dias desde 1899-12-30)
+    const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+    return new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  }
+  const m = String(v).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  const b = String(v).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (b) return new Date(+b[3], +b[2] - 1, +b[1]);
+  return null;
+}
+// Servico dentro do ciclo atual. Fail-open: sem inicio de ciclo ou data, mantem.
+function svcInCycle(v) {
+  if (!adminCycleStart) return true;
+  const d = parseSvcDate(v);
+  return !d || (d >= adminCycleStart && (!adminCycleEnd || d <= adminCycleEnd));
 }
 
 function normNameAdmin(s) {
@@ -748,6 +770,8 @@ async function loadAdminResumo(opts = {}) {
       const prow = frows.find(r => String(r[0]||'').toUpperCase().includes('PERÍODO ATUAL') || String(r[0]||'').toUpperCase().includes('PERIODO ATUAL'));
       const m = prow && String(prow[1]||'').match(/-\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       adminCycleEnd = m ? new Date(parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1])) : null;
+      const ms = prow && String(prow[1]||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);  // 1a data = inicio
+      adminCycleStart = ms ? new Date(parseInt(ms[3]), parseInt(ms[2])-1, parseInt(ms[1])) : null;
     }
 
     const pdvSheet = wb.SheetNames.find(s => s === 'PDV');
@@ -842,6 +866,7 @@ async function loadAdminServicos() {
       const pdv = String(row[0]||'').trim();
       const name = normNameAdmin(row[1]);
       if (!name || !/^\d{4,6}$/.test(pdv)) continue;
+      if (!svcInCycle(row[4])) continue;  // col 4 = DATA REALIZACAO — conta so o ciclo atual
       const qty = typeof row[5]==='number' ? row[5] : parseFloat(String(row[5]).replace(',','.'));
       if (isNaN(qty)) continue;
       const key = name + '_' + pdv;

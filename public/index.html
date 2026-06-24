@@ -2517,12 +2517,14 @@ function extractAll(pdv, sellers) {
 
   // Serviços da loja: somar todos os registros da aba PDV da planilha ServicosLoja
   // (mais preciso que o agregado da Resumo, pois conta cada serviço realizado)
+  const servInCycle = makeServiceCycleFilter();  // conta só serviços do ciclo atual
   const servPdvRows = getSheet('servicosRealizados', 'PDV');
   if (servPdvRows) {
     let totalServ = 0;
     for (const r of servPdvRows.slice(1)) {
-      if (String(r[0]||'').trim() === pdv) {
-        totalServ += nlz(r[4]);  // col 4 = QUANTIDADE na aba PDV
+      // aba PDV: col 3 = DATA REALIZACAO, col 4 = QUANTIDADE
+      if (String(r[0]||'').trim() === pdv && servInCycle(r[3])) {
+        totalServ += nlz(r[4]);
       }
     }
     loja.servicos = totalServ;
@@ -2616,10 +2618,12 @@ function extractAll(pdv, sellers) {
         for (const r of servRows.slice(1)) {
           const rowPdv = String(r[0]||'').trim();
           if (!pdvsToAgg.includes(rowPdv)) continue;
+          if (!servInCycle(r[4])) continue;  // col 4 = DATA REALIZACAO (CONSULTOR)
           if (normName(r[1]) === can) servicos += nlz(r[5]);
         }
       } else {
         for (const r of servRows.slice(1)) {
+          if (!servInCycle(r[4])) continue;
           if (normName(r[1]) === can) servicos += nlz(r[5]);
         }
       }
@@ -2826,6 +2830,42 @@ function parseCycleEnd(periodStr) {
   const m = periodStr.match(/-\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (!m) return null;
   return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
+}
+
+// Início do ciclo = 1ª data do "PERÍODO ATUAL" (FILTROS). A planilha de Serviços é
+// um log com DATA REALIZACAO que inclui lançamentos de ciclos anteriores; sem filtrar
+// por essa janela, a contagem infla (não bate com o oficial do Resumo/extranet).
+function parseCycleStart(periodStr) {
+  if (!periodStr) return null;
+  const m = periodStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);  // primeira data
+  if (!m) return null;
+  return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
+}
+// Normaliza a DATA REALIZACAO (Date | ISO 'YYYY-MM-DD' | 'DD/MM/YYYY' | serial Excel) -> Date|null.
+function parseServiceDate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'number') {  // serial Excel (dias desde 1899-12-30), normaliza via UTC
+    const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+    return new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  }
+  const m = String(v).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  const b = String(v).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (b) return new Date(+b[3], +b[2] - 1, +b[1]);
+  return null;
+}
+// Filtro (dateVal -> bool) que mantém só Serviços dentro do ciclo atual.
+// Fail-open: sem período definido ou data não-parseável, mantém o lançamento.
+function makeServiceCycleFilter() {
+  const period = extractPeriod('resumo');
+  const start = parseCycleStart(period);
+  const end = parseCycleEnd(period);
+  return (dateVal) => {
+    if (!start) return true;
+    const d = parseServiceDate(dateVal);
+    return !d || (d >= start && (!end || d <= end));
+  };
 }
 
 // Segmento IAF "fecha" no ultimo dia do ciclo (data de fim vem da planilha).
@@ -3718,11 +3758,13 @@ function renderServicosTab() {
 
   // Cols: 0=PDV, 1=CONSULTOR, 2=UN, 3=NOME DO SERVIÇO, 4=DATA, 5=QUANTIDADE
   // Filtra pelo PDV selecionado
+  const servInCycle = makeServiceCycleFilter();  // só serviços do ciclo atual
   const byConsultor = {}; // can -> { name, types: { 'Cuidados Faciais': { qty, dates:[] } } }
   for (const r of rows.slice(1)) {
     if (!r || !r[1]) continue;
     const rowPdv = String(r[0]||'').trim();
     if (rowPdv !== selectedPdv) continue;
+    if (!servInCycle(r[4])) continue;  // col 4 = DATA REALIZACAO
     const fullname = String(r[1]).trim();
     const can = normName(fullname);
     const type = String(r[3]||'').trim();
