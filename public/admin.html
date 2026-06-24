@@ -630,12 +630,21 @@ const SLACK_IDS = {
   // Sustentavel Palmeira (24617)
   'EDUARDA': 'U0AKMS2LNEA',
   'ALEXIA': 'U0ALX1EJUC8',         // Larissa Alexia da Silva Souza
+  'TAINÁ': 'U0BA9MCGX6K',          // Tayná (chave do cadastro = TAINÁ)
   // Teotonio Vilela (24671)
   'CAMILLE': 'U09JGAFFZB6',
   'ELIENE': 'U087P8JF97F',
   'JOSENILDO': 'U0ASY08QHTN',      // JÚNIOR é mesclado para JOSENILDO no import
   'SHAYANE': 'U0AT1KKLWNS',
 };
+// Lookup do canal por nome NORMALIZADO (sem acento), pra nao cair no _default por
+// diferenca de acento/encoding (NFC/NFD) entre a chave do cadastro e a do SLACK_IDS.
+const SLACK_IDS_NORM = Object.fromEntries(
+  Object.entries(SLACK_IDS).filter(([k]) => k !== '_default').map(([k, v]) => [normNameAdmin(k), v])
+);
+function slackChannelFor(name) {
+  return SLACK_IDS_NORM[normNameAdmin(name)] || SLACK_IDS._default;
+}
 let allSellerMetas = {};
 let globalMetas = {};
 
@@ -1104,7 +1113,7 @@ $('slackSendAllBtn').addEventListener('click', async () => {
   let sent = 0;
 
   for (const [name, metas] of sellers) {
-    const channel = SLACK_IDS[name] || SLACK_IDS._default;
+    const channel = slackChannelFor(name);
     const msg = buildAdminSlackMsg(name, metas, pdv);
     try {
       const r = await fetch('/api/slack/dm', {
