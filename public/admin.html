@@ -675,18 +675,24 @@ function renderSlackSellerList() {
     list.innerHTML = '<div style="color:var(--ink-dim); font-size:13px; padding:12px;">Nenhuma consultora nesta loja. Importe a planilha de comissao primeiro.</div>';
     return;
   }
-  let html = '<div class="file-grid">';
+  const pausadas = sellers.filter(([, d]) => d.paused).length;
+  let html = '';
+  if (pausadas) html += `<div style="font-size:12px; color:#c98a3a; margin-bottom:8px;">${pausadas} consultora(s) pausada(s) — não recebem alerta no Slack.</div>`;
+  html += '<div class="file-grid">';
   for (const [name, m] of sellers) {
+    const paused = !!m.paused;
     const rec = m.receita ? 'R$ ' + Math.round(m.receita).toLocaleString('pt-BR') : '—';
     const sk = m.skin ? 'R$ ' + Math.round(m.skin).toLocaleString('pt-BR') : '—';
     const svc = m.servicos ? Math.round(m.servicos) : '—';
-    html += `<div class="file-row">
-      <div class="file-dot ok"></div>
-      <div class="file-name" style="flex:1;">${name}</div>
+    html += `<div class="file-row" style="${paused ? 'opacity:0.5;' : ''}">
+      <div class="file-dot ${paused ? '' : 'ok'}"${paused ? ' style="background:#c98a3a;"' : ''}></div>
+      <div class="file-name" style="flex:1;">${name}${paused ? ' <span style="font-size:10px; color:#c98a3a; border:1px solid #c98a3a; border-radius:4px; padding:1px 5px; margin-left:6px;">PAUSADA</span>' : ''}</div>
       <div class="file-info">Rec ${rec} · Skin ${sk} · Svc ${svc}</div>
       <div class="file-info" style="display:flex; align-items:center; gap:5px;">NPS
         <input type="text" data-nps-seller="${name}" value="${m.nps || ''}" placeholder="0"
           style="width:50px; text-align:right; padding:3px 6px;">%</div>
+      <button type="button" data-toggle-pause="${name}" title="${paused ? 'Voltar a receber alertas' : 'Parar de enviar alertas (ex.: licença)'}"
+        style="font-size:11px; padding:4px 10px; margin-left:8px; cursor:pointer; border-radius:6px; border:1px solid var(--line); background:${paused ? 'var(--accent)' : 'transparent'}; color:${paused ? '#fff' : 'var(--ink)'};">${paused ? 'Reativar' : 'Pausar'}</button>
     </div>`;
   }
   html += '</div>';
@@ -706,6 +712,25 @@ function renderSlackSellerList() {
         if (r.ok) toast(`NPS de ${sellerName}: ${val || '0'}%`);
         else toast('Erro ao salvar NPS.');
       } catch (err) { toast('Erro ao salvar NPS: ' + err.message); }
+    });
+  });
+
+  // Pausar/Reativar alertas por consultora (ex.: licença). Grava o flag `paused` no
+  // seller-metas (merge no servidor preserva as metas); o disparo exclui quem está pausado.
+  list.querySelectorAll('[data-toggle-pause]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const sellerName = e.currentTarget.dataset.togglePause;
+      const next = !(allSellerMetas[sellerName] && allSellerMetas[sellerName].paused);
+      try {
+        const r = await fetch('/api/seller-metas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [sellerName]: { paused: next } }),
+        });
+        if (!r.ok) { toast('Erro ao salvar.'); return; }
+        if (allSellerMetas[sellerName]) allSellerMetas[sellerName].paused = next;
+        toast(next ? `${sellerName}: alertas pausados` : `${sellerName}: alertas reativados`);
+        renderSlackSellerList();
+      } catch (err) { toast('Erro: ' + err.message); }
     });
   });
 }
@@ -1132,8 +1157,10 @@ function buildAdminSlackMsg(name, metas, pdv) {
 
 $('slackSendAllBtn').addEventListener('click', async () => {
   const pdv = $('slackStoreSelect').value;
-  const sellers = Object.entries(allSellerMetas).filter(([n, d]) => d.pdv === pdv && !SKIP_NAMES.test(n));
-  if (!sellers.length) { toast('Nenhuma consultora nesta loja.'); return; }
+  const allInStore = Object.entries(allSellerMetas).filter(([n, d]) => d.pdv === pdv && !SKIP_NAMES.test(n));
+  const sellers = allInStore.filter(([, d]) => !d.paused);          // pausadas (licença) não recebem alerta
+  const pausadasCount = allInStore.length - sellers.length;
+  if (!sellers.length) { toast(pausadasCount ? 'Todas as consultoras desta loja estão pausadas.' : 'Nenhuma consultora nesta loja.'); return; }
 
   // Guard: bloquear envio se nao temos dados de realizado (evita Slack com tudo zerado)
   const hasDataForPdv = Object.values(adminConsultorData).some(d => d.pdv === pdv);
@@ -1171,7 +1198,7 @@ $('slackSendAllBtn').addEventListener('click', async () => {
 
   btn.disabled = false;
   btn.textContent = 'Enviar Slack para todos da loja';
-  toast(`${sent}/${sellers.length} mensagens enviadas para ${LOJA_NAMES[pdv]}!`);
+  toast(`${sent}/${sellers.length} mensagens enviadas para ${LOJA_NAMES[pdv]}${pausadasCount ? ` · ${pausadasCount} pausada(s)` : ''}!`);
 });
 
 // ---------- Import Comissao ----------
