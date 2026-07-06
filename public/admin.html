@@ -979,6 +979,29 @@ function aggregateConsultor(canonName, pdvs) {
   };
 }
 
+// Total da LOJA (soma de TODAS as consultoras do(s) PDV): usado pela consultora
+// responsavel, que responde pela meta da loja. R$/qtd somados; taxas (BM, itens, PRM,
+// turbinado, resgate, ID) ponderadas por boletos. A soma das linhas de consultora bate
+// com o total da aba PDV do Resumo (validado). pdvs pode ter >1 loja (ex.: Palmeira).
+function aggregateStore(pdvs) {
+  const rows = Object.values(adminConsultorData).filter(d => pdvs.includes(d.pdv));
+  if (!rows.length) return null;
+  let receita=0, boletos=0, skin=0, servicos=0, itensW=0, turbW=0, prmW=0, resgW=0, idW=0;
+  for (const d of rows) {
+    const b = d.boletos || 0;
+    receita += d.receita||0; boletos += b; skin += d.skin||0; servicos += d.servicos||0;
+    itensW += (d.itensBoleto||0)*b; turbW += (d.turbinado||0)*b;
+    prmW += (d.prm||0)*b; resgW += (d.resgate||0)*b; idW += (d.idCliente||0)*b;
+  }
+  const wavg = x => boletos > 0 ? x/boletos : 0;
+  return {
+    name: rows[0].name, pdv: pdvs[0], receita, boletos, skin, servicos,
+    boletoMedio: boletos > 0 ? receita/boletos : 0,
+    itensBoleto: wavg(itensW), turbinado: wavg(turbW), prm: wavg(prmW),
+    resgate: wavg(resgW), idCliente: wavg(idW),
+  };
+}
+
 function buildAdminSlackMsg(name, metas, pdv) {
   const store = LOJA_NAMES[pdv] || pdv;
   const fmtR = (v) => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
@@ -995,9 +1018,17 @@ function buildAdminSlackMsg(name, metas, pdv) {
   if (diasUteis < 1) diasUteis = 1;
 
   let actual = findConsultorActual(name, pdv) || {};
-  // Cross-store: se a consultora atua em mais de uma loja, soma as lojas (= extranet)
-  const crossPdvs = actual.name && CROSS_STORE_CONSULTORES[actual.name];
-  if (crossPdvs) actual = aggregateConsultor(actual.name, crossPdvs) || actual;
+  const isLead = metas.storeLead || allSellerMetas[name]?.storeLead;
+  if (isLead) {
+    // Consultora responsavel: o realizado dela e o TOTAL da(s) loja(s), nao as vendas
+    // individuais — ela responde pela meta da loja. Cecilia = Palmeira (24617+24668).
+    const leadPdvs = (actual.name && CROSS_STORE_CONSULTORES[actual.name]) || [pdv];
+    actual = aggregateStore(leadPdvs) || actual;
+  } else {
+    // Cross-store (nao-lider): soma as linhas DELA nas lojas (= extranet)
+    const crossPdvs = actual.name && CROSS_STORE_CONSULTORES[actual.name];
+    if (crossPdvs) actual = aggregateConsultor(actual.name, crossPdvs) || actual;
+  }
   const aRec = actual.receita || 0;
   const aSkin = actual.skin || 0;
   const aBM = actual.boletoMedio || 0;
@@ -1201,6 +1232,18 @@ async function handleComFile(file) {
       Object.assign(all[n], m);
     }
   }
+  // Aba "Consultora Resposável" (ciclo 10+): estas consultoras respondem pela META DA
+  // LOJA inteira, nao por meta individual. Receita/BM/skin aqui sao valores de loja e
+  // SUBSTITUEM a linha individual delas na aba "Consultor de loja". storeLead=true faz o
+  // disparo comparar o realizado TOTAL da loja (nao as vendas dela) contra esta meta.
+  const respSheet = wb.SheetNames.find(s => /RESPOS[ÁA]VEL|RESPONS[ÁA]VEL/i.test(s));
+  if (respSheet) {
+    for (const [n,m] of Object.entries(parseComSheet(wb, respSheet, 1, 2, 2))) {
+      const lead = { storeLead: true };
+      for (const k of ['receita','boletoMedio','skin']) if (m[k] != null) lead[k] = m[k];
+      all[n] = lead;  // meta de loja substitui a individual desta consultora
+    }
+  }
   // Merge JÚNIOR → JOSENILDO
   if (all['JÚNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JÚNIOR']}; delete all['JÚNIOR']; }
   if (all['JUNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JUNIOR']}; delete all['JUNIOR']; }
@@ -1309,10 +1352,21 @@ $('comConfirmBtn').addEventListener('click', async () => {
     for (const pdv of PDVS) {
       const sellers = Object.entries(sellerMetas).filter(([,m]) => m.pdv === pdv);
       if (!sellers.length) continue;
-      const rec = sellers.reduce((s,[,m]) => s + (m.receita||0), 0);
-      const sk = sellers.reduce((s,[,m]) => s + (m.skin||0), 0);
-      const bms = sellers.filter(([,m]) => m.boletoMedio).map(([,m]) => m.boletoMedio);
-      const bm = bms.length ? Math.round(bms.reduce((a,b) => a+b, 0) / bms.length) : '';
+      // Se a loja tem uma consultora responsavel (storeLead), a meta oficial da loja vem
+      // DELA (aba Consultora Resposável) — nao da soma das individuais, e sem contar a
+      // propria lider duas vezes. Sem lider, mantem o calculo por soma (comportamento antigo).
+      const lead = sellers.find(([,m]) => m.storeLead);
+      let rec, sk, bm;
+      if (lead) {
+        rec = lead[1].receita || 0;
+        sk = lead[1].skin || 0;
+        bm = lead[1].boletoMedio ? Math.round(lead[1].boletoMedio) : '';
+      } else {
+        rec = sellers.reduce((s,[,m]) => s + (m.receita||0), 0);
+        sk = sellers.reduce((s,[,m]) => s + (m.skin||0), 0);
+        const bms = sellers.filter(([,m]) => m.boletoMedio).map(([,m]) => m.boletoMedio);
+        bm = bms.length ? Math.round(bms.reduce((a,b) => a+b, 0) / bms.length) : '';
+      }
       await fetch(`/api/store-metas/${pdv}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ receitaLoja: String(Math.round(rec)), skinLoja: String(Math.round(sk)), boletoMedio: bm ? String(bm) : '', auditoriaLoja: '95' }),
