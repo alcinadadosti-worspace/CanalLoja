@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin · Resultado Diário</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="/comissao-parser.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1209,38 +1210,10 @@ const STORE_OPTIONS = {
   '24669': 'Penedo', '24670': 'Coruripe', '24671': 'Teotonio',
   'digital': 'Digital', 'gerente_norte': 'Gerente Norte', 'gerente_sul': 'Gerente Sul', 'gerente_digital': 'Gerente Digital',
 };
-const COM_VAR_MAP = {
-  'RECEITA':'receita','BOLETO MÉDIO':'boletoMedio','BOLETO MEDIO':'boletoMedio',
-  'CRESCIMENTO DE BOLETO MÉDIO':'boletoMedio','SKIN':'skin','CATEGORIA (SKIN)':'skin',
-  'SERVIÇOS':'servicos','SERVICOS':'servicos','QUANTIDADE DE SERVIÇOS':'servicos',
-  'ITENS/BOLETO':'itensBoleto','ITENS POR BOLETO':'itensBoleto',
-  'AUDITORIA':'auditoria','NPS':'nps','PRM':'prm','TURBINADO':'turbinado',
-  'RESGATE':'resgate','ID CLIENTE':'idCliente','ID  CLIENTE':'idCliente',
-  'ID DO CLIENTE':'idCliente','CONVERSÃO':'conversao','CONVERSAO':'conversao',
-  'RECEITA CABELOS':'receitaCabelos','RECEITA SKIN':'receitaSkin','RECEITA MAKE':'receitaMake',
-  'CALÇADA PERFUMADA':'calcadaPerfumada',
-};
+// COM_VAR_MAP e parseComSheet migraram para /comissao-parser.js — o import
+// retroativo do histórico (index.html) usa o mesmo parser.
 
 let comParsedData = {};
-
-function parseComSheet(wb, sheetName, nc, vc, mc) {
-  const ws = wb.Sheets[sheetName];
-  if (!ws) return {};
-  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-  const res = {};
-  let cur = null;
-  for (const row of data) {
-    const c1 = String(row[nc]||'').trim(), c2 = String(row[vc]||'').trim(), c3 = row[mc];
-    if (c2 === 'PREENCHIMENTO' && c1) { cur = c1.toUpperCase(); if (!res[cur]) res[cur] = {}; continue; }
-    if (c1 === 'VARIÁVEL') continue;
-    if (cur && c1 && !c1.startsWith('Saldo')) {
-      const k = COM_VAR_MAP[c1.toUpperCase().trim()];
-      if (k && c3 !== '' && c3 != null) { const v = typeof c3==='number'?c3:parseFloat(String(c3).replace(',','.')); if (!isNaN(v)) res[cur][k] = v; }
-    }
-    if (c1 && c1.startsWith('Saldo')) cur = null;
-  }
-  return res;
-}
 
 async function handleComFile(file) {
   const buf = await file.arrayBuffer();
@@ -1249,38 +1222,11 @@ async function handleComFile(file) {
   catch (xe) { toast(`Comissao corrompida: ${xe.message}`); return; }
   if (!wb.SheetNames || !wb.SheetNames.length) { toast('Comissao sem abas.'); return; }
 
-  const all = {};
-  const sheets = [
-    ['Gerente de unidade loja',1,2,2], ['Gerente de canal Loja',1,2,2],
-    ['Consultor de loja',1,2,2], ['Consultora de serviços',0,1,1], ['Consultor Loja digital',0,1,1],
-  ];
-  const missingSheets = [];
-  for (const [name,nc,vc,mc] of sheets) {
-    if (!wb.Sheets[name]) { missingSheets.push(name); continue; }
-    for (const [n,m] of Object.entries(parseComSheet(wb,name,nc,vc,mc))) {
-      if (!all[n]) all[n] = {};
-      Object.assign(all[n], m);
-    }
-  }
-  // Aba "Consultora Resposável" (ciclo 10+): estas consultoras respondem pela META DA
-  // LOJA inteira, nao por meta individual. Receita/BM/skin aqui sao valores de loja e
-  // SUBSTITUEM a linha individual delas na aba "Consultor de loja". storeLead=true faz o
-  // disparo comparar o realizado TOTAL da loja (nao as vendas dela) contra esta meta.
-  const respSheet = wb.SheetNames.find(s => /RESPOS[ÁA]VEL|RESPONS[ÁA]VEL/i.test(s));
-  if (respSheet) {
-    for (const [n,m] of Object.entries(parseComSheet(wb, respSheet, 1, 2, 2))) {
-      const lead = { storeLead: true };
-      for (const k of ['receita','boletoMedio','skin']) if (m[k] != null) lead[k] = m[k];
-      all[n] = lead;  // meta de loja substitui a individual desta consultora
-    }
-  }
-  // Merge JÚNIOR → JOSENILDO
-  if (all['JÚNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JÚNIOR']}; delete all['JÚNIOR']; }
-  if (all['JUNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JUNIOR']}; delete all['JUNIOR']; }
-  // ANNY → JULIENE: a planilha do ciclo 11 ainda traz "ANNY" na aba "Consultor Loja
-  // digital", mas quem opera o canal desde 20/07/2026 é a JULIENE REIS — erro de
-  // digitação na origem. Sem isso, re-importar a planilha ressuscita a ANNY.
-  if (all['ANNY']) { all['JULIENE'] = {...(all['JULIENE']||{}), ...all['ANNY']}; delete all['ANNY']; }
+  // Parsing (abas, aba "Consultora Resposável"/storeLead, merges JÚNIOR→JOSENILDO
+  // e ANNY→JULIENE) vive em /comissao-parser.js, compartilhado com o import
+  // retroativo da aba Histórico no index.html — a lógica não pode divergir entre
+  // as duas telas.
+  const { metas: all, abasAusentes: missingSheets } = ComissaoParser.parseComissaoWorkbook(XLSX, wb);
 
   const count = Object.keys(all).length;
   if (count === 0) {
@@ -1320,17 +1266,32 @@ function renderComPreview() {
   autoAssignPdvs();
 }
 
+// Preenche o PDV de cada consultora a partir do cadastro atual. Se isto falhar em
+// silencio, TODOS os selects ficam no primeiro item (Sao Sebastiao) e confirmar o
+// import moveria a rede inteira de loja — por isso o erro tem que aparecer.
 async function autoAssignPdvs() {
+  const total = Object.keys(comParsedData).length;
+  let atribuidos = 0;
   try {
     const r = await fetch('/api/seller-metas');
-    if (!r.ok) return;
+    if (!r.ok) {
+      toast(`ATENCAO: nao foi possivel ler o cadastro (${r.status}). Os PDVs NAO foram preenchidos — confira loja por loja antes de confirmar.`);
+      return;
+    }
     const existing = await r.json();
     for (const name of Object.keys(comParsedData)) {
       const selId = 'comPdv_' + name.replace(/\s/g,'_');
       const sel = $(selId);
-      if (sel && existing[name] && existing[name].pdv) sel.value = existing[name].pdv;
+      if (sel && existing[name] && existing[name].pdv) { sel.value = existing[name].pdv; atribuidos++; }
     }
-  } catch {}
+    if (total && !atribuidos) {
+      toast('ATENCAO: nenhuma consultora casou com o cadastro — todos os PDVs estao no primeiro item. Confira antes de confirmar.');
+    } else if (atribuidos < total) {
+      toast(`${total - atribuidos} consultora(s) sem PDV no cadastro — confira o PDV delas antes de confirmar.`);
+    }
+  } catch (e) {
+    toast(`ATENCAO: falha ao ler o cadastro (${e.message}). Os PDVs NAO foram preenchidos.`);
+  }
 }
 
 $('comConfirmBtn').addEventListener('click', async () => {

@@ -399,6 +399,15 @@ app.get('/login.html', (req, res) => {
 app.get('/admin.html', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
+// Parser da comissao: precisa ficar FORA do static protegido por requirePage.
+// O admin.html e servido sem o cookie de usuario (tem senha propria), entao um
+// <script src> dele para dentro do static levava redirect pro login e a pagina
+// recebia HTML no lugar do JS — quebrando o import de comissao. Sem segredo aqui,
+// e so a logica de leitura da planilha.
+app.get('/comissao-parser.js', (req, res) => {
+  res.type('application/javascript');
+  res.sendFile(path.join(PUBLIC_DIR, 'comissao-parser.js'));
+});
 
 // Pagina principal protegida
 const INDEX_TEMPLATE = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
