@@ -617,7 +617,8 @@ const SLACK_IDS = {
   'CAROL': 'U0BBSVDGNP5',
   'VITÓRIA': 'U0BBWRCFVM0',           // entrou no ciclo 10
   // Digital
-  'ANNY': 'U08JFCGBFSA',
+  'JULIENE': 'U0BGDSAR0VA',       // Juliene Reis — assumiu o canal digital no ciclo 11
+  // ANNY (U08JFCGBFSA) saiu do canal digital no ciclo 11 — ID guardado caso volte
   // Palmeira (24668)
   'CECÍLIA': 'U0AL2NDNH09',       // Maria Cicília Brito Veiga
   // VALESCA removida (24/06/2026): desligada — nao trabalha mais, sem disparo
@@ -1276,6 +1277,10 @@ async function handleComFile(file) {
   // Merge JÚNIOR → JOSENILDO
   if (all['JÚNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JÚNIOR']}; delete all['JÚNIOR']; }
   if (all['JUNIOR']) { all['JOSENILDO'] = {...(all['JOSENILDO']||{}), ...all['JUNIOR']}; delete all['JUNIOR']; }
+  // ANNY → JULIENE: a planilha do ciclo 11 ainda traz "ANNY" na aba "Consultor Loja
+  // digital", mas quem opera o canal desde 20/07/2026 é a JULIENE REIS — erro de
+  // digitação na origem. Sem isso, re-importar a planilha ressuscita a ANNY.
+  if (all['ANNY']) { all['JULIENE'] = {...(all['JULIENE']||{}), ...all['ANNY']}; delete all['ANNY']; }
 
   const count = Object.keys(all).length;
   if (count === 0) {

@@ -1560,7 +1560,7 @@ const LABELS = {
   lojaDigital: 'Canal Digital (Loja Digital)',
 };
 
-// Canal Digital — atendimento via Loja Digital (canal próprio operado pela Anny,
+// Canal Digital — atendimento via Loja Digital (canal próprio operado pela Juliene,
 // que direciona clientes pra cada PDV físico). Os dados não somam com a receita
 // das lojas (bases diferentes: Receita Líquida vs Receita GMV). É só drill-down
 // do indicador "Loja Digital Ativo" que cada loja já tem no Resumo.
@@ -3064,13 +3064,13 @@ function buildReport() {
   // Não soma com a receita da loja (bases diferentes: Receita Líquida vs GMV).
   const dig = extractCanalDigital(selectedPdv);
   const digResumo = extractDigitalFromResumo(selectedPdv);
-  // Metas do Canal Digital (globais — Anny opera todas as lojas)
+  // Metas do Canal Digital (globais — a consultora digital opera todas as lojas)
   const metaDigReceita = nlz($('metaDigitalReceita').value);
   const metaDigConversao = nlz($('metaDigitalConversao').value);
   const metaDigBM = nlz($('metaDigitalBM').value);
   if (dig && (dig.encaminhados > 0 || dig.atendidos > 0 || dig.receita > 0)) {
     const fmtPctDec = (v) => `${(v * 100).toFixed(2).replace('.', ',')}%`;
-    ln.push(`:globe_with_meridians: CANAL DIGITAL (atendimento via Loja Digital — Anny)`);
+    ln.push(`:globe_with_meridians: CANAL DIGITAL (atendimento via Loja Digital — Juliene)`);
     ln.push(` • Clientes encaminhados: ${dig.encaminhados}`);
     ln.push(` • Clientes atendidos: ${dig.atendidos}`);
     ln.push(` • TME ajustado: ${dig.tme || '—'}`);
@@ -3845,8 +3845,8 @@ function renderServicosTab() {
 }
 
 // ---------- TAB 6: LOJA DIGITAL ----------
-// Visão dedicada do canal Loja Digital (Anny atende clientes encaminhados pra
-// cada PDV). Mostra: card geral (TODOS) + tabela por PDV + tabela da Anny por loja.
+// Visão dedicada do canal Loja Digital (Juliene atende clientes encaminhados pra
+// cada PDV). Mostra: card geral (TODOS) + tabela por PDV + tabela da consultora digital por loja.
 function renderDigitalTab() {
   const geral = $('dashDigitalGeral');
   const pdvTable = $('dashDigitalPdvTable');
@@ -3895,7 +3895,7 @@ function renderDigitalTab() {
     const conversaoPct = t.conversao * 100;
     geral.innerHTML = `
       <div class="hub-card">
-        <div class="hub-card-title">🌐 Canal Loja Digital — TOTAL do CP (Anny)</div>
+        <div class="hub-card-title">🌐 Canal Loja Digital — TOTAL do CP (Juliene)</div>
         <div class="hub-card-grid">
           ${item('Encaminhados', fmtInt(t.encaminhados), 'clientes recebidos')}
           ${item('Atendidos', fmtInt(t.atendidos), 'clientes atendidos')}
