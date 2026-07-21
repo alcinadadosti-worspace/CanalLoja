@@ -30,6 +30,11 @@ const META_DEFAULTS = {
 const metaStore = { ...META_DEFAULTS };
 const storeMetasStore = {};
 const sellerMetasStore = {};
+const historicoStore = {};   // { "<ciclo>": snapshot } — ver /api/historico
+
+// Calendario dos ciclos (datas oficiais do Boticario). O app so conhece a string
+// de periodo da aba FILTROS das planilhas; este mapa e quem diz "isso e o ciclo 10".
+const CICLOS = require('./config/ciclos-2026.json');
 
 // ---------- Rate limiter (login endpoints) ----------
 const loginAttempts = new Map();
@@ -250,6 +255,69 @@ app.post('/api/seller-metas', requireAdminOnly, async (req, res) => {
   res.json(resp);
 });
 
+// ---------- Historico por ciclo ----------
+// Calendario oficial dos ciclos — o front usa pra traduzir "PERIODO ATUAL" em numero de ciclo.
+app.get('/api/ciclos', requireAnyAuth, (req, res) => res.json(CICLOS));
+
+app.get('/api/historico', requireAnyAuth, (req, res) => {
+  res.json({ ...historicoStore });
+});
+
+// Grava o snapshot de UM ciclo. Dois caminhos:
+//  - origem 'auto': gerado sozinho quando o painel carrega as planilhas do servidor.
+//  - origem 'retroativo': import manual de um ciclo passado (planilhas locais no painel).
+// Guarda contra aba velha esquecida aberta: um snapshot 'auto' nao sobrescreve ciclo
+// que fechou ha mais de 30 dias. Import retroativo e sempre explicito, entao passa.
+app.post('/api/historico', requireAnyAuth, async (req, res) => {
+  const s = req.body || {};
+  const ciclo = parseInt(s.ciclo, 10);
+  if (!Number.isInteger(ciclo) || ciclo < 1 || ciclo > 40) {
+    return res.status(400).json({ error: 'ciclo_invalido' });
+  }
+  if (typeof s.periodo !== 'string' || !s.periodo.trim()) {
+    return res.status(400).json({ error: 'periodo_ausente' });
+  }
+  if (typeof s.lojas !== 'object' || !s.lojas || typeof s.consultoras !== 'object' || !s.consultoras) {
+    return res.status(400).json({ error: 'payload_invalido' });
+  }
+  const key = String(ciclo);
+  const existente = historicoStore[key];
+  const origem = s.origem === 'retroativo' ? 'retroativo' : 'auto';
+  if (origem === 'auto' && existente) {
+    const fim = new Date(s.fim || 0).getTime();
+    if (!fim || Date.now() - fim > 30 * 24 * 60 * 60 * 1000) {
+      return res.status(409).json({
+        error: 'ciclo_antigo',
+        message: `Ciclo ${ciclo} ja tem snapshot e fechou ha mais de 30 dias. Use o import retroativo para sobrescrever.`,
+      });
+    }
+  }
+  historicoStore[key] = {
+    ciclo,
+    periodo: String(s.periodo).slice(0, 60),
+    inicio: s.inicio || null,
+    fim: s.fim || null,
+    dias: Number(s.dias) || null,
+    // ciclo ainda em curso: o IAF do snapshot e parcial, a aba mostra "em curso"
+    fechado: !!s.fechado,
+    origem,
+    atualizadoEm: new Date().toISOString(),
+    lojas: s.lojas,
+    consultoras: s.consultoras,
+    digital: s.digital || null,
+    metasGlobais: s.metasGlobais || null,
+    // ciclos 1-7 nao tem planilha de comissao — o front marca aqui pra UI
+    // mostrar "—" em vez de 0% nas colunas de atingimento e segmento.
+    semMetas: !!s.semMetas,
+  };
+  let backupOk = true;
+  try { await supa.saveHistorico({ ...historicoStore }); }
+  catch (e) { console.warn('[supabase] historico:', e.message); backupOk = false; }
+  const resp = { ok: true, ciclo, ciclos: Object.keys(historicoStore).length, substituiu: !!existente };
+  if (!backupOk) resp.warning = 'Snapshot salvo em memoria, mas backup na nuvem falhou.';
+  res.json(resp);
+});
+
 // Metadados
 app.get('/api/files', requireAnyAuth, (req, res) => {
   const out = {};
@@ -369,6 +437,10 @@ async function restoreFromSupabase() {
     const slm = await supa.getSellerMetas();
     Object.assign(sellerMetasStore, slm);
     if (Object.keys(slm).length) console.log(`[supabase] metas por consultora restauradas (${Object.keys(slm).length} pessoas)`);
+
+    const hist = await supa.getHistorico();
+    Object.assign(historicoStore, hist);
+    if (Object.keys(hist).length) console.log(`[supabase] historico restaurado (${Object.keys(hist).length} ciclo(s))`);
 
     const filesMeta = await supa.getFilesMeta();
     let count = 0;
