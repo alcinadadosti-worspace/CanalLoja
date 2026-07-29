@@ -1345,7 +1345,10 @@ $('comConfirmBtn').addEventListener('click', async () => {
     // Auto-calculate and save store metas
     const PDVS = ['24303','24617','24668','24669','24670','24671'];
     for (const pdv of PDVS) {
-      const sellers = Object.entries(sellerMetas).filter(([,m]) => m.pdv === pdv);
+      // SKIP_NAMES fora da conta: gerente tem meta da REDE, nao da loja. Se o select
+      // do import cair no default (Sao Sebastiao, o primeiro), a meta do gerente entrava
+      // na soma e inflava a loja — foi o que fez o 24303 virar 702.512 no ciclo 11.
+      const sellers = Object.entries(sellerMetas).filter(([n,m]) => m.pdv === pdv && !SKIP_NAMES.test(n));
       if (!sellers.length) continue;
       // Se a loja tem uma consultora responsavel (storeLead), a meta oficial da loja vem
       // DELA (aba Consultora Resposável) — nao da soma das individuais, e sem contar a
