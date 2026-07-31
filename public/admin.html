@@ -378,7 +378,8 @@ const LABELS = {
 const FILE_PATTERNS = {
   resumo: /Resumo_de_Performance_(V\d+_)?Indicadores_Loja/i,
   bbx: /ProgramaFidelidade_Distribuicao_Penetracao_boleto/i,
-  servicosRealizados: /ServicosLoja_Servicos_Realizados/i,
+  // "Servicos_em_loja" e o nome novo (31/07/2026); o antigo segue aceito
+  servicosRealizados: /ServicosLoja_Servicos_Realizados|Servicos_em_loja/i,
   cuidadosFaciais: /Loja_cuidados_faciais_iaf/i,
   lojaDigital: /LojaDigital_Performance_por_Pdv_Consultor/i,
 };
@@ -891,8 +892,9 @@ async function loadAdminCuidados() {
   } catch (e) { console.warn('loadAdminCuidados:', e); }
 }
 
-// Servicos realizados por consultora: soma da aba CONSULTOR do arquivo servicosRealizados
-// (col 0 = PDV, col 1 = nome, col 5 = quantidade). Preenche adminConsultorData[name_pdv].servicos.
+// Servicos realizados por consultora, da planilha de Servicos em Loja (o layout das
+// colunas depende do formato do relatorio — ver o comentario dentro da funcao).
+// Preenche adminConsultorData[name_pdv].servicos.
 async function loadAdminServicos() {
   try {
     const r = await fetch('/api/files/servicosRealizados');
@@ -901,15 +903,22 @@ async function loadAdminServicos() {
     let wb;
     try { wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); }
     catch (xe) { console.warn('loadAdminServicos XLSX.read:', xe); return; }
-    const csName = wb.SheetNames.find(s => s.toUpperCase() === 'CONSULTOR');
+    // O relatorio mudou em 31/07/2026:
+    //   v1 — aba CONSULTOR: PDV(0), CONSULTOR(1), UN, SERVICO, DATA REALIZACAO(4), QTD(5)
+    //   v2 — aba CONSULTANT: CONSULTOR(0), PDV(1), SERVICO, ..., QT. COMPLETOS(5)
+    // No v2 as colunas 0/1 estao trocadas e nao ha data: o relatorio ja vem so do ciclo.
+    const csName = wb.SheetNames.find(s => ['CONSULTOR','CONSULTANT'].includes(s.toUpperCase()));
     if (!csName) return;
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[csName], { header: 1, defval: '' });
+    const isV1 = (rows[0]||[]).some(c => normNameAdmin(c).includes('DATA REALIZACAO'));
+    const iPdv = isV1 ? 0 : 1, iName = isV1 ? 1 : 0;
     const totals = {}, info = {};
     for (const row of rows) {
-      const pdv = String(row[0]||'').trim();
-      const name = normNameAdmin(row[1]);
+      const pdv = String(row[iPdv]||'').trim();
+      const name = normNameAdmin(row[iName]);
       if (!name || !/^\d{4,6}$/.test(pdv)) continue;
-      if (!svcInCycle(row[4])) continue;  // col 4 = DATA REALIZACAO — conta so o ciclo atual
+      if (/^\d{4,6}$/.test(name)) continue;  // servico sem consultora atribuida (v2)
+      if (isV1 && !svcInCycle(row[4])) continue;  // no v2 a planilha ja vem do ciclo
       const qty = typeof row[5]==='number' ? row[5] : parseFloat(String(row[5]).replace(',','.'));
       if (isNaN(qty)) continue;
       const key = name + '_' + pdv;

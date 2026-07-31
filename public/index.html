@@ -1639,7 +1639,8 @@ const STORAGE_KEY = 'resultado_diario_v3_' + (window.currentUser?.username || 'g
 const FILE_PATTERNS = {
   resumo:             /Resumo_de_Performance_(V\d+_)?Indicadores_Loja/i,
   bbx:                /ProgramaFidelidade_Distribuicao_Penetracao_boleto_Fidelidade/i,
-  servicosRealizados: /ServicosLoja_Servicos_Realizados/i,
+  // "Servicos_em_loja" é o nome novo (31/07/2026); o antigo segue aceito pros ciclos já baixados
+  servicosRealizados: /ServicosLoja_Servicos_Realizados|Servicos_em_loja/i,
   cuidadosFaciais:    /Loja_cuidados_faciais_iaf/i,
   lojaDigital:        /LojaDigital_Performance_por_Pdv_Consultor/i,
 };
@@ -1734,6 +1735,7 @@ function pctClamp(frac, label) {
 }
 
 const loadedWorkbooks = {};
+const loadedFileNames = {};  // key -> nome do arquivo (o prefixo YYYYMMDD serve de data de extração)
 let storesCatalog = {};
 let selectedPdv = null;
 let sellerAliases = {};
@@ -1873,6 +1875,74 @@ function getSheet(wbKey, sheetName) {
   const found = wb.SheetNames.find(s => s.toUpperCase() === sheetName.toUpperCase());
   return found ? XLSX.utils.sheet_to_json(wb.Sheets[found], { header: 1, defval: '' }) : null;
 }
+
+// ---------- Serviços em Loja: dois formatos de relatório ----------
+// O Boticário trocou o relatório em 31/07/2026:
+//   v1 (até 22/07) — "ServicosLoja_Servicos_Realizados", abas PDV/CONSULTOR, uma linha
+//     por serviço+dia, com DATA REALIZACAO: era o app que filtrava o ciclo por data.
+//   v2 (31/07 em diante) — "Servicos_em_loja", abas PDV/CONSULTANT, já agregado e
+//     pré-filtrado pelo ciclo na origem (FILTROS traz "CICLO ATUAL"), sem data nenhuma.
+//     PDV e CONSULTOR trocaram de coluna, e vieram GMV/meta/atingimento novos.
+// Os dois seguem suportados: ciclos anteriores e snapshots do Histórico são v1.
+const SVC_COLS = {
+  v1: { pdv:  { pdv: 0, tipo: 2, data: 3, qtd: 4 },
+        cons: { pdv: 0, name: 1, tipo: 3, data: 4, qtd: 5 } },
+  v2: { pdv:  { pdv: 0, realizados: 3, incompletos: 4, qtd: 5, meta: 6, gmv: 8 },
+        cons: { name: 0, pdv: 1, tipo: 2, realizados: 3, qtd: 5, gmv: 6 } },
+};
+// Só o v1 traz DATA REALIZACAO no cabeçalho; sem ela, é v2.
+function svcIsV1(rows) {
+  if (!rows || !rows.length) return false;
+  return (rows[0] || []).some(c => String(c || '')
+    .toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes('DATA REALIZACAO'));
+}
+// Aba por consultora: CONSULTOR no v1, CONSULTANT (em inglês) no v2.
+function getSvcConsSheet() {
+  return getSheet('servicosRealizados', 'CONSULTOR') || getSheet('servicosRealizados', 'CONSULTANT');
+}
+// Linhas por consultora normalizadas nos dois formatos: {pdv, name, tipo, data, qtd}.
+// qtd = serviços COMPLETOS — nos dois formatos fecha 1:1 com o total da aba PDV.
+// data = null no v2, e aí o filtro de ciclo vira no-op (o relatório já vem do ciclo).
+// semConsultora = linhas em que o "consultor" é o próprio número do PDV (serviço sem
+// atribuição): o v2 manda essas, sempre com 0 completos.
+function getSvcConsRows() {
+  const rows = getSvcConsSheet();
+  if (!rows) return null;
+  const C = svcIsV1(rows) ? SVC_COLS.v1.cons : SVC_COLS.v2.cons;
+  const out = [];
+  for (const r of rows.slice(1)) {
+    if (!r) continue;
+    const pdv = String(r[C.pdv] || '').trim();
+    const name = String(r[C.name] || '').trim();
+    if (!name || !/^\d{4,6}$/.test(pdv)) continue;
+    out.push({
+      pdv, name,
+      tipo: String(r[C.tipo] || '').trim(),
+      data: C.data != null ? r[C.data] : null,
+      qtd: nlz(r[C.qtd]),
+      semConsultora: /^\d{4,6}$/.test(name),
+    });
+  }
+  return out;
+}
+// Total de serviços completos de uma loja, da aba PDV.
+// v1: soma as linhas que caem no ciclo. v2: já vem agregado numa linha por PDV.
+function getSvcPdvTotal(pdv) {
+  const rows = getSheet('servicosRealizados', 'PDV');
+  if (!rows) return null;
+  if (svcIsV1(rows)) {
+    const C = SVC_COLS.v1.pdv;
+    const inCycle = makeServiceCycleFilter();
+    let total = 0;
+    for (const r of rows.slice(1)) {
+      if (String(r[C.pdv] || '').trim() === pdv && inCycle(r[C.data])) total += nlz(r[C.qtd]);
+    }
+    return total;
+  }
+  const C = SVC_COLS.v2.pdv;
+  const row = rows.slice(1).find(r => String(r[C.pdv] || '').trim() === pdv);
+  return row ? nlz(row[C.qtd]) : 0;
+}
 function logDebug(msg, type='') {
   const log = $('debugLog');
   const line = document.createElement('div');
@@ -1968,6 +2038,7 @@ async function handleFiles(fileList) {
       try {
         const buf = await file.arrayBuffer();
         loadedWorkbooks[key] = XLSX.read(buf, { type: 'array' });
+        loadedFileNames[key] = file.name;
         logDebug(`✓ ${LABELS[key]} — ${file.name}`, 'ok');
 
       } catch (e) {
@@ -1997,6 +2068,7 @@ async function loadFilesFromServer() {
         if (!fr.ok) continue;
         const buf = await fr.arrayBuffer();
         loadedWorkbooks[key] = XLSX.read(buf, { type: 'array' });
+        loadedFileNames[key] = info.filename || '';
         logDebug(`↓ Carregado do servidor: ${info.filename}`, 'ok');
         any = true;
       } catch (e) {
@@ -2044,12 +2116,20 @@ function updateUploadAreaUI() {}
 function extractPeriod(wbKey) {
   const rows = getSheet(wbKey, 'FILTROS');
   if (!rows) return null;
+  // "PERÍODO ATUAL" nos relatórios antigos; o de Serviços passou a chamar "CICLO ATUAL"
+  // e traz duas linhas com esse rótulo — vale a das datas, não a "11 - 2026 a 11 - 2026".
+  // Sem isso o Serviços viraria "(sem filtro)" e a checagem de períodos entre planilhas
+  // (que pega planilha de ciclo trocado) deixaria justo ele de fora.
+  let semData = null;
   for (const r of rows) {
-    if (r[0] && String(r[0]).toUpperCase().includes('PERÍODO ATUAL')) {
-      return String(r[1] || '').trim();
-    }
+    const label = String(r[0] || '').toUpperCase();
+    if (!label.includes('PERÍODO ATUAL') && !label.includes('PERIODO ATUAL')
+        && !label.includes('CICLO ATUAL')) continue;
+    const v = String(r[1] || '').trim();
+    if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(v)) return v;
+    if (!semData && v) semData = v;
   }
-  return null;
+  return semData;
 }
 
 function extractPeriodAnterior(wbKey) {
@@ -2153,6 +2233,9 @@ function detectStoresAndSellers() {
   const rows = getSheet('resumo', 'Consultor')
     || getSheet('bbx', 'Consultor')
     || getSheet('cuidadosFaciais', 'Consultor')
+    // de propósito não usa getSvcConsSheet(): o slice(2) abaixo pressupõe o cabeçalho
+    // do Resumo, e a planilha de Serviços (1 linha de cabeçalho) montaria um catálogo
+    // sem a 1a consultora — pior que catálogo vazio, que cai no fallback de metas
     || getSheet('servicosRealizados', 'Consultor');
 
   // Parse Consultor rows from spreadsheet
@@ -2179,7 +2262,7 @@ function detectStoresAndSellers() {
     const allFullNames = [];
     const nameSources = [
       getSheet('cuidadosFaciais', 'CONSULTOR'),
-      getSheet('servicosRealizados', 'CONSULTOR'),
+      getSvcConsSheet(),
       getSheet('bbx', 'Consultor'),
     ];
     const seen = new Set();
@@ -2234,8 +2317,17 @@ function detectStoresAndSellers() {
 // Detecta a última data com dado na planilha de Serviços (única que tem detalhe diário)
 // e compara com a data do relatório. Se diferente, mostra aviso.
 function getLatestDataDate() {
-  const rows = getSheet('servicosRealizados', 'CONSULTOR');
+  const rows = getSvcConsSheet();
   if (!rows) return null;
+  // v2 não manda mais data nenhuma. Usa o prefixo YYYYMMDD do nome do arquivo, que é a
+  // data de extração do relatório. Muda a semântica (extração, não último movimento),
+  // mas mantém de pé o aviso de "subiu planilha mais velha que o relatório".
+  if (!svcIsV1(rows)) {
+    const m = String(loadedFileNames.servicosRealizados || '').match(/(\d{4})(\d{2})(\d{2})/);
+    if (!m) return null;
+    const d = new Date(+m[1], +m[2] - 1, +m[3]);
+    return isNaN(d) ? null : d;
+  }
   let maxDate = null;
   // col 4 = DATA REALIZAÇÃO
   for (const r of rows.slice(1)) {
@@ -2617,20 +2709,10 @@ function extractAll(pdv, sellers) {
     servicos: vsAnterior(RESUMO_PDV_COLS.servicos),
   };
 
-  // Serviços da loja: somar todos os registros da aba PDV da planilha ServicosLoja
-  // (mais preciso que o agregado da Resumo, pois conta cada serviço realizado)
-  const servInCycle = makeServiceCycleFilter();  // conta só serviços do ciclo atual
-  const servPdvRows = getSheet('servicosRealizados', 'PDV');
-  if (servPdvRows) {
-    let totalServ = 0;
-    for (const r of servPdvRows.slice(1)) {
-      // aba PDV: col 3 = DATA REALIZACAO, col 4 = QUANTIDADE
-      if (String(r[0]||'').trim() === pdv && servInCycle(r[3])) {
-        totalServ += nlz(r[4]);
-      }
-    }
-    loja.servicos = totalServ;
-  }
+  // Serviços da loja: aba PDV da planilha de Serviços em Loja (mais preciso que o
+  // agregado da Resumo). getSvcPdvTotal cuida da diferença v1/v2 — ver SVC_COLS.
+  const totalServLoja = getSvcPdvTotal(pdv);
+  if (totalServLoja != null) loja.servicos = totalServLoja;
 
   // Skin loja in R$ from cuidadosFaciais file
   // PDV sheet: col 0 = PDV, col 2 = RECEITA (R$) TOTAL Cuidados Faciais + Botik
@@ -2659,7 +2741,9 @@ function extractAll(pdv, sellers) {
   const perSeller = {};
   const consRows = getSheet('resumo', 'Consultor');
   const skinConsRows = getSheet('cuidadosFaciais', 'CONSULTOR');
-  const servRows = getSheet('servicosRealizados', 'CONSULTOR');
+  // já normalizado {pdv, name, tipo, data, qtd} nos dois formatos do relatório
+  const servRows = getSvcConsRows();
+  const servInCycle = makeServiceCycleFilter();  // no v2 vira no-op: data sempre null
   const bbxRows = getSheet('bbx', 'Consultor');
 
   for (const can of sellers) {
@@ -2714,20 +2798,13 @@ function extractAll(pdv, sellers) {
       }
     }
 
-    // Servicos sum
+    // Servicos sum — sem consRows não dá pra restringir por PDV, soma só por nome
     if (servRows) {
-      if (consRows) {
-        for (const r of servRows.slice(1)) {
-          const rowPdv = String(r[0]||'').trim();
-          if (!pdvsToAgg.includes(rowPdv)) continue;
-          if (!servInCycle(r[4])) continue;  // col 4 = DATA REALIZACAO (CONSULTOR)
-          if (normName(r[1]) === can) servicos += nlz(r[5]);
-        }
-      } else {
-        for (const r of servRows.slice(1)) {
-          if (!servInCycle(r[4])) continue;
-          if (normName(r[1]) === can) servicos += nlz(r[5]);
-        }
+      for (const r of servRows) {
+        if (r.semConsultora) continue;
+        if (consRows && !pdvsToAgg.includes(r.pdv)) continue;
+        if (!servInCycle(r.data)) continue;
+        if (normName(r.name) === can) servicos += r.qtd;
       }
     }
 
@@ -4356,32 +4433,29 @@ function renderServicosTab() {
   const titleEl = $('dashSvcTitle');
   if (!container) return;
 
-  const sName = STORE_NAMES[selectedPdv];
-  if (titleEl) titleEl.textContent = sName
-    ? `${sName} – ${selectedPdv} · serviços por consultora (tipo e dia)`
-    : `Serviços por consultora — detalhado por tipo e dia`;
-
-  const rows = getSheet('servicosRealizados', 'CONSULTOR');
+  const rows = getSvcConsRows();
   if (!rows) { container.innerHTML = '<div style="color:var(--ink-mute)">Planilha de Serviços não carregada.</div>'; return; }
 
-  // Cols: 0=PDV, 1=CONSULTOR, 2=UN, 3=NOME DO SERVIÇO, 4=DATA, 5=QUANTIDADE
-  // Filtra pelo PDV selecionado
-  const servInCycle = makeServiceCycleFilter();  // só serviços do ciclo atual
+  // O relatório v2 não traz mais a data de cada serviço, só o total do ciclo por tipo —
+  // então o detalhe por dia só aparece quando a planilha carregada é a antiga.
+  const temDia = rows.some(r => r.data);
+  const sName = STORE_NAMES[selectedPdv];
+  if (titleEl) titleEl.textContent = sName
+    ? `${sName} – ${selectedPdv} · serviços por consultora (${temDia ? 'tipo e dia' : 'por tipo'})`
+    : `Serviços por consultora — detalhado por ${temDia ? 'tipo e dia' : 'tipo'}`;
+
+  const servInCycle = makeServiceCycleFilter();  // no v2 vira no-op: já vem do ciclo
   const byConsultor = {}; // can -> { name, types: { 'Cuidados Faciais': { qty, dates:[] } } }
-  for (const r of rows.slice(1)) {
-    if (!r || !r[1]) continue;
-    const rowPdv = String(r[0]||'').trim();
-    if (rowPdv !== selectedPdv) continue;
-    if (!servInCycle(r[4])) continue;  // col 4 = DATA REALIZACAO
-    const fullname = String(r[1]).trim();
-    const can = normName(fullname);
-    const type = String(r[3]||'').trim();
-    const date = r[4];
-    const qty = nlz(r[5]);
-    if (!byConsultor[can]) byConsultor[can] = { name: fullname, types: {} };
+  for (const r of rows) {
+    if (r.pdv !== selectedPdv || r.semConsultora) continue;
+    if (!servInCycle(r.data)) continue;
+    const can = normName(r.name);
+    const type = r.tipo;
+    // v2 manda o nome em CAIXA ALTA — prettyName normaliza a exibição nos dois formatos
+    if (!byConsultor[can]) byConsultor[can] = { name: prettyName(r.name), types: {} };
     if (!byConsultor[can].types[type]) byConsultor[can].types[type] = { qty: 0, dates: [] };
-    byConsultor[can].types[type].qty += qty;
-    if (date) byConsultor[can].types[type].dates.push(date);
+    byConsultor[can].types[type].qty += r.qtd;
+    if (r.data) byConsultor[can].types[type].dates.push(r.data);
   }
 
   // Format date helper
