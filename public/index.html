@@ -1506,7 +1506,7 @@
       <button class="dash-tab" data-tab="ranking">🏆 Ranking</button>
       <button class="dash-tab" data-tab="servicos">💇 Serviços detalhados</button>
       <button class="dash-tab" data-tab="digital">🌐 Loja Digital</button>
-      <button class="dash-tab" data-tab="historico">📈 Histórico · em breve</button>
+      <button class="dash-tab" data-tab="historico">📈 Histórico</button>
     </div>
 
     <!-- TAB 1: LOJA ATUAL -->
@@ -2213,21 +2213,12 @@ function renderFileStatus() {
 }
 
 // ---------- detection ----------
-function detectStoresAndSellers() {
-  storesCatalog = {};
-
-  // Perfil "digital" não usa storesCatalog — só renderiza a aba Digital.
-  // Mostra também metasSection (para editar metas do canal) e chama
-  // renderDigitalTab() direto, pulando renderDashboard que exige selectedPdv.
-  if (window.currentUser?.role === 'digital') {
-    if (loadedWorkbooks.lojaDigital) {
-      $('dashboardSection').style.display = 'block';
-      if ($('dashStoreWrap')) $('dashStoreWrap').style.display = 'none';
-      checkDataFreshness();
-      try { renderDigitalTab(); } catch(e) { console.error('renderDigitalTab:', e); }
-    }
-    return;
-  }
+// Monta o catálogo loja→consultoras a partir das planilhas carregadas. É DATA-ONLY
+// de propósito: o import retroativo do histórico precisa montar o catálogo de um
+// ciclo passado sem mexer na tela do ciclo que está no ar.
+// Quem mexe na UI é detectStoresAndSellers(), logo abaixo.
+function buildStoresCatalog() {
+  const storesCatalog = {};
 
   // From Consultor sheet — try resumo first, then fallbacks
   const rows = getSheet('resumo', 'Consultor')
@@ -2300,6 +2291,27 @@ function detectStoresAndSellers() {
       if (!window.isPdvAllowed(pdv)) delete storesCatalog[pdv];
     }
   }
+
+  return storesCatalog;
+}
+
+function detectStoresAndSellers() {
+  storesCatalog = {};
+
+  // Perfil "digital" não usa storesCatalog — só renderiza a aba Digital.
+  // Mostra também metasSection (para editar metas do canal) e chama
+  // renderDigitalTab() direto, pulando renderDashboard que exige selectedPdv.
+  if (window.currentUser?.role === 'digital') {
+    if (loadedWorkbooks.lojaDigital) {
+      $('dashboardSection').style.display = 'block';
+      if ($('dashStoreWrap')) $('dashStoreWrap').style.display = 'none';
+      checkDataFreshness();
+      try { renderDigitalTab(); } catch(e) { console.error('renderDigitalTab:', e); }
+    }
+    return;
+  }
+
+  storesCatalog = buildStoresCatalog();
 
   renderStoreSelect();
   if (Object.keys(storesCatalog).length > 0) {
@@ -3730,6 +3742,16 @@ function buildCicloSnapshot() {
   const lojas = {}, consultoras = {};
   let temAlgumaMeta = false;
 
+  // Metas indexadas pela CONSULTORA (nome canônico), não pela loja. Quem trabalhou
+  // em duas lojas no ciclo é registrada uma vez só, na primeira loja iterada — e a
+  // meta dela pode estar cadastrada na outra. Indexando por loja, a meta sumia justo
+  // nesses casos e a consultora aparecia sem meta no histórico.
+  const metasPorConsultora = {};
+  for (const [nomeCurto, d] of Object.entries(sellerMetasAll)) {
+    const nomesDaLoja = storesCatalog[d.pdv] ? Array.from(storesCatalog[d.pdv].sellers.keys()) : [];
+    metasPorConsultora[resolveCanonical(nomeCurto, nomesDaLoja) || nomeCurto.toUpperCase()] = d;
+  }
+
   for (const [pdv, ex] of Object.entries(todas)) {
     if (!ex || !ex.loja) continue;
     const sm = storeMetasAll[pdv] || {};
@@ -3746,22 +3768,13 @@ function buildCicloSnapshot() {
       },
     };
 
-    // Metas por consultora desta loja. Resolvidas aqui e não via metaPerSeller
-    // porque aquele só é preenchido para a loja selecionada.
-    const fullNames = storesCatalog[pdv] ? Array.from(storesCatalog[pdv].sellers.keys()) : [];
-    const metasDaLoja = {};
-    for (const [nomeCurto, d] of Object.entries(sellerMetasAll)) {
-      if (d.pdv !== pdv) continue;
-      metasDaLoja[resolveCanonical(nomeCurto, fullNames) || nomeCurto.toUpperCase()] = d;
-    }
-
     for (const [can, ps] of Object.entries(ex.perSeller || {})) {
       // Consultora cross-store já vem agregada pelo extractAll: registra uma vez só.
       if (consultoras[can]) {
         if (!consultoras[can].pdvs.includes(pdv)) consultoras[can].pdvs.push(pdv);
         continue;
       }
-      const m = metasDaLoja[can] || null;
+      const m = metasPorConsultora[can] || null;
       const metaR = m && m.receita ? Number(m.receita) : 0;
       const metaS = m && m.skin ? Number(m.skin) : 0;
       if (metaR) temAlgumaMeta = true;
@@ -3818,8 +3831,219 @@ async function salvarSnapshotCiclo(origem) {
   }
 }
 
+// ---------- IMPORT RETROATIVO ----------
+// Grava o snapshot de um ciclo PASSADO a partir das planilhas daquele ciclo, sem
+// tocar no ciclo que está no ar. Roda tudo em memória e devolve o estado no finally.
+//
+// Duas armadilhas que este caminho tem que desviar:
+//  1. buildCicloSnapshot() lê as metas de window._serverSellerMetas e dos inputs de
+//     meta global — que são as de HOJE. Importar o ciclo 8 sem trocar isso gravaria
+//     o realizado do ciclo 8 dividido pela meta do ciclo 11.
+//  2. O PDV de cada consultora sai do catálogo DAQUELE ciclo, não do cadastro atual:
+//     entre dezembro e agosto entrou e saiu gente, e quem mudou de loja apareceria
+//     no lugar errado.
+// Os mesmos 3 níveis do resolveCanonical, mas testados NÍVEL A NÍVEL em todas as
+// lojas antes de afrouxar. Rodar o resolveCanonical loja a loja não serve aqui:
+// "MARIA FERNANDA" casaria com MARIA FERNANDA GOMES VIEIRA (nível 1, Penedo) e
+// também com MARIA TACIANE e MARIA CICILIA pelo nível 3 (primeiro token), em
+// outras duas lojas — e a consultora ficaria "ambígua" sem ser.
+const NIVEIS_MATCH = [
+  (ft, ct) => ct.every((t, i) => ft[i] === t),   // prefixo de tokens
+  (ft, ct) => ct.every(t => ft.includes(t)),     // todos os tokens presentes
+  (ft, ct) => ft[0] === ct[0],                   // último recurso: primeiro nome
+];
+// Receita por (pdv, consultora) do Resumo daquele ciclo — só para desempatar quem
+// aparece em mais de uma loja. Mesmas colunas que o extractAll usa: nome, pdv, receita.
+function receitaPorLojaDoResumo() {
+  const rows = getSheet('resumo', 'Consultor');
+  const out = {};
+  if (!rows) return out;
+  for (const r of rows.slice(2)) {
+    const pdv = String(r[1] || '').trim();
+    if (!r[0] || !/^\d{4,6}$/.test(pdv)) continue;
+    const can = normName(r[0]);
+    if (!can || can === 'TOTAL') continue;
+    out[pdv + '|' + can] = (out[pdv + '|' + can] || 0) + nlz(r[2]);
+  }
+  return out;
+}
+
+// Uma consultora pode trabalhar em duas lojas no mesmo ciclo (a Kemilly no ciclo 8
+// aparece em São Sebastião E Palmeira). A comissão traz UMA meta por pessoa, então
+// alguém tem que decidir a qual loja ela pertence: fica com a loja onde ela mais
+// vendeu no ciclo. Empate real (mesma receita) continua sem PDV, para não chutar.
+// Lojas onde o nome curto casa, no nível de match mais específico que produziu
+// alguma coisa, ordenadas pela receita da pessoa naquela loja (maior primeiro).
+function candidatosDePdv(nomeCurto, catalogo, receitas) {
+  const c = normName(nomeCurto);
+  if (!c) return [];
+  const aliasVal = CONSULTOR_ALIASES[c] || c;
+  const candidates = Array.isArray(aliasVal) ? aliasVal : [aliasVal];
+  for (const nivel of NIVEIS_MATCH) {
+    const achados = new Map();   // pdv -> nome completo casado
+    for (const cand of candidates) {
+      const ct = String(cand).split(/\s+/).filter(Boolean);
+      if (!ct.length) continue;
+      for (const [pdv, info] of Object.entries(catalogo)) {
+        for (const full of info.sellers.keys()) {
+          if (nivel(full.split(/\s+/), ct) && !achados.has(pdv)) achados.set(pdv, full);
+        }
+      }
+    }
+    if (!achados.size) continue;
+    return [...achados.entries()]
+      .map(([pdv, full]) => ({ pdv, receita: (receitas && receitas[pdv + '|' + full]) || 0 }))
+      .sort((a, b) => b.receita - a.receita);
+  }
+  return [];
+}
+
+function pdvDaConsultoraNoCiclo(nomeCurto, catalogo, receitas) {
+  const cs = candidatosDePdv(nomeCurto, catalogo, receitas);
+  if (cs.length === 1) return cs[0].pdv;
+  // empate de receita (inclusive 0 x 0): não dá para escolher com honestidade
+  if (cs.length > 1 && cs[0].receita !== cs[1].receita) return cs[0].pdv;
+  return null;
+}
+
+// Consultora responsável é UMA POR LOJA — dá para atribuir por eliminação, e é bem
+// mais confiável que receita. No ciclo 10 existem duas Brunas (Palmeira e Coruripe)
+// e a de Palmeira vendeu mais, então o critério de receita mandava a lead pro
+// Palmeira — que já era da Cecília, e o Coruripe ficava sem meta de loja.
+// Quem tem menos lojas possíveis escolhe primeiro.
+function lojasDasResponsaveis(metas, catalogo, receitas) {
+  const fila = Object.entries(metas)
+    .filter(([, m]) => m.storeLead)
+    .map(([nome]) => ({ nome, cands: candidatosDePdv(nome, catalogo, receitas) }))
+    .sort((a, b) => a.cands.length - b.cands.length);
+  const out = {}, ocupadas = new Set();
+  for (const { nome, cands } of fila) {
+    const livre = cands.find(c => !ocupadas.has(c.pdv));
+    if (!livre) continue;
+    out[nome] = livre.pdv;
+    ocupadas.add(livre.pdv);
+  }
+  return out;
+}
+
+// opts.dryRun: calcula o snapshot e devolve sem gravar. O .env local aponta pro
+// Supabase de PRODUÇÃO, então conferir antes de escrever não é luxo.
+async function importarCicloRetroativo(fileList, opts) {
+  const dryRun = !!(opts && opts.dryRun);
+  const GLOBAL_IDS = ['metaPRM','metaTurbinado','metaID','metaResgate','metaBBX','metaItensBoleto','metaNPS','metaAuditoria'];
+  const bkWb = { ...loadedWorkbooks };
+  const bkCatalogo = storesCatalog;
+  const bkSeller = window._serverSellerMetas;
+  const bkStore = window._serverStoreMetas;
+  const bkGlobais = {};
+  for (const id of GLOBAL_IDS) if ($(id)) bkGlobais[id] = $(id).value;
+
+  try {
+    for (const k of Object.keys(loadedWorkbooks)) delete loadedWorkbooks[k];
+
+    let comWb = null;
+    const naoReconhecidos = [];
+    for (const f of fileList) {
+      let wb;
+      try { wb = XLSX.read(await f.arrayBuffer(), { type: 'array' }); }
+      catch (e) { return { ok: false, motivo: `erro lendo ${f.name}: ${e.message}` }; }
+      const key = classifyFile(f.name);
+      if (key) loadedWorkbooks[key] = wb;
+      else if (/comiss|metas/i.test(f.name)) comWb = wb;
+      else naoReconhecidos.push(f.name);
+    }
+
+    const faltando = REQUIRED.filter(k => !loadedWorkbooks[k]);
+    if (!loadedWorkbooks.resumo) {
+      return { ok: false, motivo: 'sem a planilha de Resumo — é ela que dá o período e o catálogo' };
+    }
+
+    storesCatalog = buildStoresCatalog();
+    if (!Object.keys(storesCatalog).length) {
+      return { ok: false, motivo: 'nenhuma loja/consultora reconhecida nas planilhas' };
+    }
+
+    // Qual ciclo é isto, antes de ler a comissão: o parser precisa saber se o
+    // canal digital daquela época já era da Juliene (ciclo 11+) ou ainda da Anny.
+    const cicloDetectado = cicloDoPeriodo(extractPeriod('resumo'));
+    if (!cicloDetectado) {
+      return { ok: false, motivo: 'periodo_nao_e_ciclo', periodo: extractPeriod('resumo') };
+    }
+
+    // Metas daquele ciclo. Sem comissão o ciclo entra só com realizado: metas
+    // vazias fazem buildCicloSnapshot marcar semMetas, e a aba já avisa.
+    const ambiguas = [];
+    if (comWb) {
+      const { metas, globais } = ComissaoParser.parseComissaoWorkbook(XLSX, comWb, {
+        digitalEhJuliene: cicloDetectado.ciclo >= 11,
+      });
+      const receitas = receitaPorLojaDoResumo();
+      const lojaDaLead = lojasDasResponsaveis(metas, storesCatalog, receitas);
+      const sellerMetas = {};
+      for (const [nomeCurto, m] of Object.entries(metas)) {
+        if (ComissaoParser.SKIP_NAMES.test(nomeCurto)) continue;
+        const pdv = lojaDaLead[nomeCurto] || pdvDaConsultoraNoCiclo(nomeCurto, storesCatalog, receitas);
+        if (!pdv) { ambiguas.push(nomeCurto); continue; }
+        sellerMetas[nomeCurto] = { ...m, pdv };
+      }
+      window._serverSellerMetas = sellerMetas;
+      window._serverStoreMetas = ComissaoParser.derivarMetasDeLoja(sellerMetas);
+      const MAP = { prm:'metaPRM', turbinado:'metaTurbinado', idCliente:'metaID',
+                    resgate:'metaResgate', nps:'metaNPS', auditoria:'metaAuditoria',
+                    itensBoleto:'metaItensBoleto' };
+      for (const [k, id] of Object.entries(MAP)) {
+        if (globais[k] != null && $(id)) $(id).value = globais[k];
+      }
+      // BBX não vem da comissão (é desafio, não meta de comissão): sem valor
+      // próprio do ciclo, zera em vez de herdar o de hoje.
+      if ($('metaBBX')) $('metaBBX').value = '';
+    } else {
+      window._serverSellerMetas = {};
+      window._serverStoreMetas = {};
+      for (const id of GLOBAL_IDS) if ($(id)) $(id).value = '';
+    }
+
+    const snap = buildCicloSnapshot();
+    if (!snap) {
+      return { ok: false, motivo: 'periodo_nao_e_ciclo',
+               periodo: extractPeriod('resumo') };
+    }
+
+    const resumo = {
+      ok: true, ciclo: snap.ciclo, periodo: snap.periodo,
+      lojas: Object.keys(snap.lojas).length,
+      consultoras: Object.keys(snap.consultoras).length,
+      semMetas: snap.semMetas, faltando, ambiguas, naoReconhecidos,
+    };
+
+    if (dryRun) return { ...resumo, dryRun: true, snapshot: snap };
+
+    const r = await fetch('/api/historico', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...snap, origem: 'retroativo' }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, motivo: j.error || 'erro', message: j.message };
+
+    historicoCache = null;
+    return { ...resumo, substituiu: !!j.substituiu };
+  } finally {
+    for (const k of Object.keys(loadedWorkbooks)) delete loadedWorkbooks[k];
+    Object.assign(loadedWorkbooks, bkWb);
+    storesCatalog = bkCatalogo;
+    window._serverSellerMetas = bkSeller;
+    window._serverStoreMetas = bkStore;
+    for (const [id, v] of Object.entries(bkGlobais)) if ($(id)) $(id).value = v;
+  }
+}
+window.importarCicloRetroativo = importarCicloRetroativo;
+
 // Dispara uma vez por carga de planilhas, depois que tudo já está calculado.
 function agendarSnapshotAuto() {
+  // Só quem enxerga TODAS as lojas pode gravar o snapshot: extractAllStores()
+  // respeita isPdvAllowed, então um perfil restrito (hub gestora) montaria um
+  // snapshot só com as lojas dele e gravaria por cima do ciclo completo.
+  if (window.currentUser?.perms?.allowedPdvs !== '*') return;
   if (_snapshotAgendado) return;
   _snapshotAgendado = true;
   setTimeout(async () => {
@@ -4094,12 +4318,28 @@ function histRenderIaf(el, ciclos) {
   }));
   if (!nomes.size) { el.innerHTML = `<div class="hist-empty">Sem consultoras no histórico ainda.</div>`; return; }
 
+  // Quem nunca teve segmento apurado em ciclo nenhum vira uma linha inteira de
+  // traço. São as consultoras que passaram pela rede nos ciclos 1-7, que não têm
+  // planilha de comissão e portanto não têm IAF: ruído puro no heatmap. Ficam de
+  // fora daqui (o realizado delas continua no gráfico e na tabela) e o rodapé diz
+  // quantas são, para a ausência não passar por dado faltando.
+  const temIaf = (can) => ciclos.some(s => {
+    const c = s.consultoras?.[can];
+    return c && (c.iafTier != null || c.iafPct != null);
+  });
+  const todas = Array.from(nomes.entries());
+  const semIaf = todas.filter(([can]) => !temIaf(can));
+
   const ultimo = ciclos[ciclos.length - 1];
-  const linhas = Array.from(nomes.entries()).sort((a, b) => {
+  const linhas = todas.filter(([can]) => temIaf(can)).sort((a, b) => {
     const pa = ultimo.consultoras?.[a[0]]?.iafPct ?? -1;
     const pb = ultimo.consultoras?.[b[0]]?.iafPct ?? -1;
     return pb - pa || a[1].localeCompare(b[1], 'pt-BR');
   });
+  if (!linhas.length) {
+    el.innerHTML = `<div class="hist-empty">Nenhum ciclo do histórico tem segmento IAF apurado — o IAF depende da planilha de comissão do ciclo.</div>`;
+    return;
+  }
 
   let html = `<div class="hist-viz"><div class="hub-table-wrap"><table class="hist-iaf-table">
     <thead><tr><th class="hist-iaf-nome">Consultora</th>${ciclos.map(c => `<th title="${histEsc(c.periodo)}">C${c.ciclo}${c.fechado ? '' : '<br><span style="font-weight:400;color:var(--ink-dim)">em curso</span>'}</th>`).join('')}</tr></thead><tbody>`;
@@ -4133,7 +4373,12 @@ function histRenderIaf(el, ciclos) {
       <span><i style="background:var(--hist-iaf-3)"></i>🥇 Ouro</span>
       <span><i style="background:var(--hist-iaf-4)"></i>💎 Diamante</span>
       <span style="color:var(--ink-dim)">% = ciclo em curso · – = sem segmento apurado</span>
-    </div></div>`;
+    </div>`;
+  if (semIaf.length) {
+    const listadas = semIaf.map(([, n]) => String(n).split(' ').slice(0, 2).join(' ')).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    html += `<div class="hist-aviso">· ${semIaf.length} consultora(s) fora deste quadro por não terem segmento apurado em nenhum ciclo — o realizado delas continua no gráfico e na tabela: ${histEsc(listadas.join(', '))}.</div>`;
+  }
+  html += `</div>`;
   el.innerHTML = html;
 }
 
