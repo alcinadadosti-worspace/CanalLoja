@@ -1351,32 +1351,21 @@ $('comConfirmBtn').addEventListener('click', async () => {
     const j = await r.json();
     toast(`Metas de ${j.count} consultoras salvas!`);
 
-    // Auto-calculate and save store metas
-    const PDVS = ['24303','24617','24668','24669','24670','24671'];
-    for (const pdv of PDVS) {
-      // SKIP_NAMES fora da conta: gerente tem meta da REDE, nao da loja. Se o select
-      // do import cair no default (Sao Sebastiao, o primeiro), a meta do gerente entrava
-      // na soma e inflava a loja — foi o que fez o 24303 virar 702.512 no ciclo 11.
-      const sellers = Object.entries(sellerMetas).filter(([n,m]) => m.pdv === pdv && !SKIP_NAMES.test(n));
-      if (!sellers.length) continue;
-      // Se a loja tem uma consultora responsavel (storeLead), a meta oficial da loja vem
-      // DELA (aba Consultora Resposável) — nao da soma das individuais, e sem contar a
-      // propria lider duas vezes. Sem lider, mantem o calculo por soma (comportamento antigo).
-      const lead = sellers.find(([,m]) => m.storeLead);
-      let rec, sk, bm;
-      if (lead) {
-        rec = lead[1].receita || 0;
-        sk = lead[1].skin || 0;
-        bm = lead[1].boletoMedio ? Math.round(lead[1].boletoMedio) : '';
-      } else {
-        rec = sellers.reduce((s,[,m]) => s + (m.receita||0), 0);
-        sk = sellers.reduce((s,[,m]) => s + (m.skin||0), 0);
-        const bms = sellers.filter(([,m]) => m.boletoMedio).map(([,m]) => m.boletoMedio);
-        bm = bms.length ? Math.round(bms.reduce((a,b) => a+b, 0) / bms.length) : '';
-      }
+    // Auto-calculate and save store metas — mesma regra que o import retroativo
+    // do historico usa, para o ciclo nao ter meta de loja diferente conforme o
+    // caminho que gravou (ver derivarMetasDeLoja em comissao-parser.js).
+    const metasLoja = ComissaoParser.derivarMetasDeLoja(sellerMetas);
+    for (const [pdv, m] of Object.entries(metasLoja)) {
+      // auditoriaLoja/npsLoja NAO entram aqui: sao REALIZADO que o admin ajusta na
+      // mao (ver secao Metas por Loja), nao meta da comissao. Mandar '95' fixo a
+      // cada import apagava o valor real — o servidor faz merge, entao omitir preserva.
       await fetch(`/api/store-metas/${pdv}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receitaLoja: String(Math.round(rec)), skinLoja: String(Math.round(sk)), boletoMedio: bm ? String(bm) : '', auditoriaLoja: '95' }),
+        body: JSON.stringify({
+          receitaLoja: String(Math.round(m.receitaLoja)),
+          skinLoja: String(Math.round(m.skinLoja)),
+          boletoMedio: m.boletoMedio ? String(m.boletoMedio) : '',
+        }),
       });
     }
     toast('Metas por loja recalculadas!');
