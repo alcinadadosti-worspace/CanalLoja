@@ -4186,7 +4186,11 @@ async function importarCicloRetroativo(fileList, opts) {
       const lojaDaLead = lojasDasResponsaveis(metas, storesCatalog, receitas);
       const sellerMetas = {};
       for (const [nomeCurto, m] of Object.entries(metas)) {
-        if (ComissaoParser.SKIP_NAMES.test(nomeCurto)) continue;
+        // NAO_E_PESSOA (rótulo de papel, totalizadores) e não SKIP_NAMES: quem saiu
+        // da empresa hoje trabalhou nos ciclos passados e a meta dela faz parte
+        // daquele resultado. Quem já não estava na rede naquele ciclo não aparece
+        // no catálogo do ciclo e não recebe PDV — o próprio dado resolve.
+        if (ComissaoParser.NAO_E_PESSOA.test(nomeCurto)) continue;
         const pdv = lojaDaLead[nomeCurto] || pdvDaConsultoraNoCiclo(nomeCurto, storesCatalog, receitas);
         if (!pdv) { ambiguas.push(nomeCurto); continue; }
         sellerMetas[nomeCurto] = { ...m, pdv };
@@ -4195,7 +4199,7 @@ async function importarCicloRetroativo(fileList, opts) {
       // Arredonda como o admin faz ao persistir em _store_metas (String(Math.round)).
       // Sem isto o mesmo ciclo teria meta com centavos diferentes conforme o caminho
       // que gravou — o snapshot automático lê o cadastro, já inteiro.
-      const metasLoja = ComissaoParser.derivarMetasDeLoja(sellerMetas);
+      const metasLoja = ComissaoParser.derivarMetasDeLoja(sellerMetas, { historico: true });
       for (const m of Object.values(metasLoja)) {
         m.receitaLoja = Math.round(m.receitaLoja);
         m.skinLoja = Math.round(m.skinLoja);

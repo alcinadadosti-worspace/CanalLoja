@@ -635,7 +635,10 @@ const SLACK_IDS = {
   'NAYARA': 'U0B1D2NM47M',
   // Sustentavel Palmeira (24617)
   'EDUARDA': 'U0AKMS2LNEA',
-  'ALEXIA': 'U0ALX1EJUC8',         // Larissa Alexia da Silva Souza
+  // ALEXIA (Larissa Alexia da Silva Souza, U0ALX1EJUC8) desligada em 08/08/2026 —
+  // ID removido para nao haver caminho de DM. Ela NAO entra em SKIP_NAMES: trabalhou
+  // ate o ciclo 8 e o historico daqueles ciclos precisa da meta dela (ver
+  // NAO_E_PESSOA em comissao-parser.js).
   'TAINÁ': 'U0BA9MCGX6K',          // Tayná (chave do cadastro = TAINÁ)
   // Teotonio Vilela (24671)
   'CAMILLE': 'U09JGAFFZB6',
@@ -668,7 +671,10 @@ async function loadGlobalMetasForSlack() {
   } catch {}
 }
 
-const SKIP_NAMES = /^(GERENTE|LEIDIANE|VALESCA|TOTAL|RECEITA)/i;
+// Fonte unica em /comissao-parser.js: havia uma copia aqui e outra la, entao
+// desligar alguem exigia editar os dois lugares — e esquecer um deixava a pessoa
+// recebendo Slack ou entrando na meta da loja.
+const SKIP_NAMES = ComissaoParser.SKIP_NAMES;
 
 function renderSlackSellerList() {
   const pdv = $('slackStoreSelect').value;

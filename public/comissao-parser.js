@@ -144,10 +144,17 @@
     return { metas: all, globais, abasAusentes, leads };
   }
 
-  // Gerente tem meta da REDE, nao da loja — fica fora de qualquer soma por PDV.
-  // Pega a linha literal "GERENTE CANAL LOJA"; as gerentes de unidade sao
-  // reconhecidas pelo papel (papel === 'gerente'), nao pelo nome.
-  const SKIP_NAMES = /^(GERENTE|LEIDIANE|VALESCA|TOTAL|RECEITA)/i;
+  // Linhas que NAO SAO PESSOA: rotulo de papel ("GERENTE CANAL LOJA") e totalizadores.
+  // Isto e estrutura da planilha e vale para qualquer ciclo, inclusive os passados.
+  const NAO_E_PESSOA = /^(GERENTE|TOTAL|RECEITA)/i;
+
+  // SKIP_NAMES acrescenta QUEM SAIU DA EMPRESA — e portanto nao recebe Slack nem
+  // entra na meta da loja do ciclo corrente. E um filtro sobre a situacao de HOJE:
+  // nao pode ser aplicado ao import retroativo, senao apaga a meta de quem
+  // trabalhou naquele ciclo (era o caso da Valesca no ciclo 8, R$ 60.035 sumidos
+  // da meta do Palmeira). No caminho historico use NAO_E_PESSOA — o catalogo
+  // daquele ciclo ja sabe quem estava na rede.
+  const SKIP_NAMES = /^(GERENTE|LEIDIANE|VALESCA|ALEXIA|TOTAL|RECEITA)/i;
 
   const ehGerente = (nome, m) => SKIP_NAMES.test(nome) || (m && m.papel === 'gerente');
 
@@ -160,13 +167,21 @@
    * meta de loja diferente conforme o caminho que gravou.
    *
    * @param sellerMetas { NOME: { pdv, receita, skin, boletoMedio, storeLead } }
+   * @param opts { historico?: boolean } — no caminho historico, so exclui o que e
+   *   estrutural (rotulo de papel e gerente de unidade). Quem foi desligada DEPOIS
+   *   trabalhou naquele ciclo e a meta dela compoe a meta da loja de entao; usar
+   *   SKIP_NAMES ali derrubaria o Sustentavel do ciclo 8 de R$ 30.000 para R$ 15.000.
    * @returns { pdv: { receitaLoja, skinLoja, boletoMedio } }  (numeros, nao strings)
    */
-  function derivarMetasDeLoja(sellerMetas) {
+  function derivarMetasDeLoja(sellerMetas, opts) {
+    const historico = !!(opts && opts.historico);
+    const fora = (n, m) => historico
+      ? (NAO_E_PESSOA.test(n) || (m && m.papel === 'gerente'))
+      : ehGerente(n, m);
     const out = {};
     for (const pdv of PDVS) {
       const sellers = Object.entries(sellerMetas)
-        .filter(([n, m]) => m.pdv === pdv && !ehGerente(n, m));
+        .filter(([n, m]) => m.pdv === pdv && !fora(n, m));
       if (!sellers.length) continue;
       // Com consultora responsavel, a meta oficial da loja e a DELA (aba
       // "Consultora Resposável") — nao a soma das individuais, e sem contar a
@@ -190,5 +205,5 @@
     return out;
   }
 
-  global.ComissaoParser = { parseComissaoWorkbook, derivarMetasDeLoja, ehGerente, COM_VAR_MAP, SKIP_NAMES, PDVS };
+  global.ComissaoParser = { parseComissaoWorkbook, derivarMetasDeLoja, ehGerente, COM_VAR_MAP, SKIP_NAMES, NAO_E_PESSOA, PDVS };
 })(window);
