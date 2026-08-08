@@ -313,6 +313,9 @@ app.post('/api/historico', requireAnyAuth, async (req, res) => {
     servicosPorDia: (s.servicosPorDia && typeof s.servicosPorDia === 'object' && Object.keys(s.servicosPorDia).length)
       ? s.servicosPorDia
       : (existente?.servicosPorDia || null),
+    servicosPorTipo: (s.servicosPorTipo && typeof s.servicosPorTipo === 'object' && Object.keys(s.servicosPorTipo).length)
+      ? s.servicosPorTipo
+      : (existente?.servicosPorTipo || null),
     // ciclos 1-7 nao tem planilha de comissao — o front marca aqui pra UI
     // mostrar "—" em vez de 0% nas colunas de atingimento e segmento.
     semMetas: !!s.semMetas,

@@ -1004,6 +1004,34 @@
   .hist-delta-down { color: var(--red); }
   .hist-fech-titulo { font-size: 13px; color: var(--ink); margin: 18px 0 8px; font-weight: 600; }
 
+  /* sparkline de contexto dentro do card do painel diário */
+  .dash-spark {
+    display: flex; align-items: center; gap: 8px; margin-top: 10px;
+    padding-top: 8px; border-top: 1px solid var(--line);
+    font-size: 10px; color: var(--ink-mute); font-family: 'JetBrains Mono', monospace;
+  }
+  .dash-spark svg { flex: 0 0 auto; }
+  .dash-spark-dim { color: var(--ink-dim); }
+
+  /* seleção múltipla do comparador */
+  .hist-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .hist-chip {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px;
+    color: var(--ink-mute); cursor: pointer; font-size: 11px; padding: 5px 12px;
+    font-family: 'JetBrains Mono', monospace; transition: all .15s;
+  }
+  .hist-chip:hover { color: var(--ink); border-color: var(--ink-dim); }
+  .hist-chip.on { background: var(--accent); border-color: var(--accent); color: #1a1508; font-weight: 600; }
+  .hist-chips-nota { font-size: 11px; color: var(--ink-dim); align-self: center; margin-left: 4px; }
+
+  /* barras horizontais do mix de serviços */
+  .hist-mix-row { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: center; margin-bottom: 8px; }
+  .hist-mix-nome { font-size: 12px; color: var(--ink); }
+  .hist-mix-bar { display: flex; height: 22px; border-radius: 3px; overflow: hidden; background: var(--bg-2); }
+  .hist-mix-seg { display: flex; align-items: center; justify-content: center; font-size: 10px; color: #0b1a2e; overflow: hidden; white-space: nowrap; }
+  .hist-mix-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; font-size: 11px; color: var(--ink-mute); }
+  .hist-mix-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+
   /* hub mega card */
   .hub-card {
     background: linear-gradient(135deg, var(--bg-2) 0%, var(--bg-3) 100%);
@@ -1623,7 +1651,66 @@
         <button class="hist-subtab" data-hview="ritmo">Ritmo do ciclo</button>
         <button class="hist-subtab" data-hview="servicos">Serviços por dia</button>
         <button class="hist-subtab" data-hview="consultora">Ficha da consultora</button>
+        <button class="hist-subtab" data-hview="comparar">Comparar</button>
+        <button class="hist-subtab" data-hview="digital">Canal digital</button>
         <button class="hist-subtab" data-hview="fechamento">Fechamento</button>
+      </div>
+
+      <!-- VIEW: COMPARAR -->
+      <div class="hist-view" data-hview-content="comparar" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">⚖️ Comparar ao longo dos ciclos</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Comparar</span>
+              <select id="histCmpTipo">
+                <option value="lojas">Lojas</option>
+                <option value="consultoras">Consultoras</option>
+              </select>
+            </label>
+            <label class="hist-ctl">
+              <span>Indicador</span>
+              <select id="histCmpInd"></select>
+            </label>
+            <label class="hist-ctl">
+              <span>Normalizar</span>
+              <select id="histCmpNorm">
+                <option value="valor">Valor do ciclo</option>
+                <option value="porDia">Por dia do ciclo</option>
+                <option value="indice">Índice (1º ciclo = 100)</option>
+              </select>
+            </label>
+          </div>
+          <div id="histCmpSel" class="hist-chips"></div>
+          <div id="histCmpChart"></div>
+          <div class="hub-table-wrap"><table class="hub-table" id="histCmpTabela"></table></div>
+          <div id="histCmpAviso" class="hist-aviso"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: CANAL DIGITAL -->
+      <div class="hist-view" data-hview-content="digital" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">🌐 Canal digital ao longo dos ciclos</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Indicador</span>
+              <select id="histDigInd">
+                <option value="receita">Receita</option>
+                <option value="encaminhados">Encaminhados</option>
+                <option value="atendidos">Atendidos</option>
+                <option value="convertidos">Convertidos</option>
+                <option value="conversao">Conversão %</option>
+                <option value="boletoMedio">Boleto Médio</option>
+                <option value="tme">TME (minutos)</option>
+              </select>
+            </label>
+          </div>
+          <div id="histDigKpis"></div>
+          <div id="histDigChart"></div>
+          <div class="hub-table-wrap"><table class="hub-table" id="histDigTabela"></table></div>
+          <div id="histDigAviso" class="hist-aviso"></div>
+        </div>
       </div>
 
       <!-- VIEW: RITMO -->
@@ -1674,6 +1761,10 @@
           </div>
           <div id="histSvcChart"></div>
           <div id="histSvcAviso" class="hist-aviso"></div>
+        </div>
+        <div class="dash-section">
+          <div class="dash-section-title">Mix de serviços por loja — que serviço cada loja realmente faz</div>
+          <div id="histSvcMix"></div>
         </div>
       </div>
 
@@ -3224,6 +3315,29 @@ function servicosPorDiaDoCiclo(wbKey) {
   return Object.keys(out).length ? out : null;
 }
 
+// Mix de serviços do ciclo: { "<pdv>": { "<tipo>": qtd } }. Sai do mesmo log v1
+// (a coluna NOME DO SERVICO nunca tinha sido usada). São 4 tipos no ano — Cuidados
+// Faciais, Maquiagem, Cabelo e Outros — e o mix muda bastante de loja para loja.
+function servicosPorTipoDoCiclo(wbKey) {
+  const rows = getSheet(wbKey || 'servicosRealizados', 'PDV');
+  if (!rows || !svcIsV1(rows)) return null;
+  const C = SVC_COLS.v1.pdv;
+  const inCycle = makeServiceCycleFilter();
+  const out = {};
+  for (const r of rows.slice(1)) {
+    if (!r) continue;
+    const pdv = String(r[C.pdv] || '').trim();
+    if (!/^\d{4,6}$/.test(pdv)) continue;
+    if (!inCycle(r[C.data])) continue;
+    const tipo = String(r[C.tipo] || '').trim();
+    const q = nlz(r[C.qtd]);
+    if (!tipo || !q) continue;
+    if (!out[pdv]) out[pdv] = {};
+    out[pdv][tipo] = (out[pdv][tipo] || 0) + q;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // Segmento IAF "fecha" no ultimo dia do ciclo (data de fim vem da planilha).
 // Durante o ciclo mostra o nivel travado (do ciclo anterior; Bronze se nao houver).
 // No dia do fim em diante, recalcula ao vivo com o acumulo total -> vira o novo travado.
@@ -3485,6 +3599,40 @@ function iafCalcFor(metas, ps, metaR, metaS, gMetaResgate, gMetaID) {
   return { pts, max, pct: max > 0 ? pts / max : 0 };
 }
 
+// Sparkline dos últimos ciclos FECHADOS, direto no card do painel diário — é o que
+// faz o histórico render todo dia, sem ninguém precisar abrir a aba Histórico.
+//
+// Só ciclo fechado, e de propósito NÃO compara com o número de hoje: o ciclo em
+// curso é acumulado parcial, e dizer "abaixo da média" no dia 3 seria mentira.
+// A leitura correta é "é aqui que esta loja costuma fechar".
+function histSparkline(pdv, key) {
+  if (!pdv || !key || !historicoCache) return '';
+  const cfg = HIST_INDICADORES[key];
+  if (!cfg) return '';
+  const fech = Object.values(historicoCache)
+    .filter(s => s.fechado && s.lojas?.[pdv]?.[key] != null && isFinite(s.lojas[pdv][key]))
+    .sort((a, b) => a.ciclo - b.ciclo)
+    .slice(-6);
+  if (fech.length < 3) return '';
+
+  const vals = fech.map(s => nlz(s.lojas[pdv][key]));
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const w = 92, h = 20, span = (max - min) || 1;
+  const x = (i) => (vals.length === 1 ? w / 2 : (i / (vals.length - 1)) * w);
+  const y = (v) => h - ((v - min) / span) * (h - 4) - 2;
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const media = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const ultimo = fech[fech.length - 1];
+
+  return `<div class="dash-spark" title="${histEsc(cfg.label)} nos últimos ${vals.length} ciclos fechados (C${fech[0].ciclo} a C${ultimo.ciclo}) — média ${histFmt(media, cfg.tipo)}">
+    <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+      <polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.55"/>
+      <circle cx="${x(vals.length - 1).toFixed(1)}" cy="${y(vals[vals.length - 1]).toFixed(1)}" r="2" fill="currentColor"/>
+    </svg>
+    <span>média ${histFmt(media, cfg.tipo)} <span class="dash-spark-dim">· ${vals.length} ciclos fechados</span></span>
+  </div>`;
+}
+
 function renderDashboard() {
   if (!selectedPdv) return;
   const enabled = Object.keys(sellerEnabled).filter(c =>
@@ -3542,8 +3690,10 @@ function renderDashboard() {
     return `<div style="margin-top:6px; font-size:11px; color:${color}; font-family:'JetBrains Mono',monospace;">${arrow} ${sign}${pct}% vs período anterior</div>`;
   };
 
-  // Card genérico — usado em ambas as grades
-  const card = (label, value, sub, pct, rawNum, vsAnt) => {
+  // Card genérico — usado em ambas as grades.
+  // histKey liga o card ao mesmo indicador no histórico: rende o sparkline de
+  // contexto. Cards que não têm equivalente por loja (canal digital) passam nada.
+  const card = (label, value, sub, pct, rawNum, vsAnt, histKey) => {
     let cls = 'dash-card', barCls = '';
     if (pct >= 1) { cls += ' success'; barCls = 'green'; }
     else if (pct >= 0.5) { cls += ' warn'; barCls = 'yellow'; }
@@ -3556,6 +3706,7 @@ function renderDashboard() {
       <div class="dash-card-sub">${sub}</div>
       ${barCls ? `<div class="dash-bar"><div class="dash-bar-fill ${barCls}" style="width:0%" data-target-width="${width}"></div></div>` : ''}
       ${fmtVsAnterior(vsAnt)}
+      ${histSparkline(selectedPdv, histKey)}
     </div>`;
   };
 
@@ -3567,27 +3718,27 @@ function renderDashboard() {
 
     out.push(card('Receita', fmtBRL(lojaEx.loja.receita),
       metaReceitaLoja ? `Meta: ${fmtBRL(metaReceitaLoja)}` : '(sem meta)',
-      metaReceitaLoja ? lojaEx.loja.receita / metaReceitaLoja : 0, lojaEx.loja.receita, va.receita));
+      metaReceitaLoja ? lojaEx.loja.receita / metaReceitaLoja : 0, lojaEx.loja.receita, va.receita, 'receita'));
 
     out.push(card('Skin (Cuidados Faciais)', fmtBRL(lojaEx.loja.skin),
       metaSkinLoja ? `Meta: ${fmtBRL(metaSkinLoja)}` : '(sem meta loja)',
-      metaSkinLoja ? lojaEx.loja.skin / metaSkinLoja : 0, lojaEx.loja.skin, null));
+      metaSkinLoja ? lojaEx.loja.skin / metaSkinLoja : 0, lojaEx.loja.skin, null, 'skin'));
 
     out.push(card('Boleto Médio', fmtBRL(lojaEx.loja.boletoMedio),
       metaBoletoLoja ? `Meta: ${fmtBRL(metaBoletoLoja)}` : '(sem meta)',
-      metaBoletoLoja ? lojaEx.loja.boletoMedio / metaBoletoLoja : 0, lojaEx.loja.boletoMedio, va.boletoMedio));
+      metaBoletoLoja ? lojaEx.loja.boletoMedio / metaBoletoLoja : 0, lojaEx.loja.boletoMedio, va.boletoMedio, 'boletoMedio'));
 
     out.push(card('Itens/Boleto', lojaEx.loja.itensBoleto.toFixed(2).replace('.', ','),
       `Meta: ${metaItens.toFixed(2).replace('.', ',')}`,
-      metaItens ? lojaEx.loja.itensBoleto / metaItens : 0, lojaEx.loja.itensBoleto, va.itensBoleto));
+      metaItens ? lojaEx.loja.itensBoleto / metaItens : 0, lojaEx.loja.itensBoleto, va.itensBoleto, 'itensBoleto'));
 
     out.push(card('PRM', lojaEx.loja.prm.toFixed(2).replace('.', ',') + '%',
       `Meta: ${metaPRM}%`,
-      metaPRM ? lojaEx.loja.prm / metaPRM : 0, lojaEx.loja.prm, va.prm));
+      metaPRM ? lojaEx.loja.prm / metaPRM : 0, lojaEx.loja.prm, va.prm, 'prm'));
 
     out.push(card('Turbinado', lojaEx.loja.turbinado.toFixed(2).replace('.', ',') + '%',
       `Meta: ${metaTurb}%`,
-      metaTurb ? lojaEx.loja.turbinado / metaTurb : 0, lojaEx.loja.turbinado, va.turbinado));
+      metaTurb ? lojaEx.loja.turbinado / metaTurb : 0, lojaEx.loja.turbinado, va.turbinado, 'turbinado'));
 
     out.push(card('ID Cliente', lojaEx.loja.idCliente.toFixed(2).replace('.', ',') + '%',
       `Meta: ${metaID}%`,
@@ -3595,13 +3746,13 @@ function renderDashboard() {
 
     out.push(card('Resgate', lojaEx.loja.resgate.toFixed(2).replace('.', ',') + '%',
       `Meta: ${metaResgate}%`,
-      metaResgate ? lojaEx.loja.resgate / metaResgate : 0, lojaEx.loja.resgate, va.resgate));
+      metaResgate ? lojaEx.loja.resgate / metaResgate : 0, lojaEx.loja.resgate, va.resgate, 'resgate'));
 
     out.push(card('Desafio BBX', lojaEx.loja.bbx.toFixed(2).replace('.', ',') + '%',
       `Meta: ${metaBBX}%`,
-      metaBBX ? lojaEx.loja.bbx / metaBBX : 0, lojaEx.loja.bbx, null));
+      metaBBX ? lojaEx.loja.bbx / metaBBX : 0, lojaEx.loja.bbx, null, 'bbx'));
 
-    out.push(card('Serviços', fmtInt(lojaEx.loja.servicos), 'Total realizado', 0, lojaEx.loja.servicos, va.servicos));
+    out.push(card('Serviços', fmtInt(lojaEx.loja.servicos), 'Total realizado', 0, lojaEx.loja.servicos, va.servicos, 'servicos'));
 
     // 🌐 Canal Digital — adiciona cards se a loja teve atendimento digital
     const lojaDig = extractCanalDigital(lojaPdv);
@@ -3911,6 +4062,39 @@ function cicloDoPeriodo(periodo) {
   return c;
 }
 
+// Lojas que uma consultora RESPONSÁVEL cobre. A Cecília responde pelas duas
+// Palmeira juntas (a Sustentável é pequena e gerida junto), e a meta dela na
+// comissão é a soma das duas — comparar só com uma delas a puniria pela metade.
+// Espelha CROSS_STORE_CONSULTORES do admin.html, que faz isto no disparo.
+const LOJAS_DA_RESPONSAVEL = {
+  'MARIA CICILIA BRITO VEIGA': ['24617', '24668'],
+};
+
+// Realizado da(s) loja(s) inteira(s), no mesmo formato de uma linha de consultora:
+// somas para R$/quantidade e média ponderada por boletos para taxas e médias.
+function realizadoDaLoja(canonical, pdvPadrao, todasAsLojas) {
+  const pdvs = LOJAS_DA_RESPONSAVEL[canonical] || [pdvPadrao];
+  const linhas = pdvs.map(p => todasAsLojas[p]?.loja).filter(Boolean);
+  if (!linhas.length) return null;
+  if (linhas.length === 1) return linhas[0];
+  let receita = 0, boletos = 0, skin = 0, servicos = 0;
+  let itensW = 0, turbW = 0, prmW = 0, resgW = 0, idW = 0, bbxW = 0;
+  for (const l of linhas) {
+    const b = nlz(l.boletos);
+    receita += nlz(l.receita); boletos += b; skin += nlz(l.skin); servicos += nlz(l.servicos);
+    itensW += nlz(l.itensBoleto) * b; turbW += nlz(l.turbinado) * b;
+    prmW += nlz(l.prm) * b; resgW += nlz(l.resgate) * b;
+    idW += nlz(l.idCliente) * b; bbxW += nlz(l.bbx) * b;
+  }
+  const wavg = (x) => boletos > 0 ? x / boletos : 0;
+  return {
+    receita, boletos, skin, servicos,
+    boletoMedio: boletos > 0 ? receita / boletos : 0,
+    itensBoleto: wavg(itensW), turbinado: wavg(turbW), prm: wavg(prmW),
+    resgate: wavg(resgW), idCliente: wavg(idW), bbx: wavg(bbxW),
+  };
+}
+
 // Monta o snapshot completo do ciclo carregado: todas as lojas, todas as
 // consultoras, metas do momento e o IAF calculado.
 function buildCicloSnapshot() {
@@ -3968,14 +4152,21 @@ function buildCicloSnapshot() {
       const metaR = m && m.receita ? Number(m.receita) : 0;
       const metaS = m && m.skin ? Number(m.skin) : 0;
       if (metaR) temAlgumaMeta = true;
-      const iaf = iafCalcFor(m, ps, metaR, metaS, g.resgate, g.idCliente);
+
+      // Consultora RESPONSÁVEL pela loja: a meta dela é a meta da LOJA, então o
+      // realizado a comparar é o da loja inteira — não as vendas individuais dela.
+      // Sem isto ela aparecia com 17%-26% de IAF, dividindo a própria receita pela
+      // meta de 6 pessoas. O disparo do Slack já fazia certo; o painel e o
+      // histórico, não. Mesma regra do aggregateStore() do admin.html.
+      const realizado = (m && m.storeLead) ? (realizadoDaLoja(can, pdv, todas) || ps) : ps;
+      const iaf = iafCalcFor(m, realizado, metaR, metaS, g.resgate, g.idCliente);
       // aliasOf() só resolve nome da loja SELECIONADA — aqui pego do catálogo da
       // loja que está sendo percorrida, senão metade do histórico fica com o nome
       // canônico cru em caixa alta.
       const completo = prettyName(storesCatalog[pdv]?.sellers.get(can) || can);
       consultoras[can] = {
         nome: sellerAliases[can] || completo, nomeCompleto: completo, pdv, pdvs: [pdv],
-        ...ps,
+        ...realizado,
         metas: m ? {
           receita: metaR || null, skin: metaS || null,
           boletoMedio: m.boletoMedio || null, servicos: m.servicos || null,
@@ -4003,6 +4194,7 @@ function buildCicloSnapshot() {
     semMetas: !temAlgumaMeta,
     // null quando só existe o relatório v2, que não traz data
     servicosPorDia: servicosPorDiaDoCiclo('servicosLogV1') || servicosPorDiaDoCiclo(),
+    servicosPorTipo: servicosPorTipoDoCiclo('servicosLogV1') || servicosPorTipoDoCiclo(),
   };
 }
 
@@ -4386,7 +4578,10 @@ function renderHistoricoTab() {
   histPreencherLojasServicos(ciclos);
   try { histRenderRitmo(ciclos); } catch (e) { console.error('hist ritmo:', e); }
   try { histRenderServicos(ciclos); } catch (e) { console.error('hist servicos:', e); }
+  try { histRenderMix(ciclos); } catch (e) { console.error('hist mix:', e); }
   try { histRenderConsultora(ciclos); } catch (e) { console.error('hist consultora:', e); }
+  try { histRenderComparar(ciclos); } catch (e) { console.error('hist comparar:', e); }
+  try { histRenderDigital(ciclos); } catch (e) { console.error('hist digital:', e); }
   try { histRenderFechamento(ciclos); } catch (e) { console.error('hist fechamento:', e); }
 
   const key = $('histIndicador')?.value || 'receita';
@@ -5073,6 +5268,263 @@ function histRenderServicos(ciclos) {
   }
   if (agrup === 'semana') avisos.push(`Média por dia da semana (não soma) — domingos aparecem menos vezes no período e somar puniria o dia.`);
   if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
+}
+
+// ---------- MIX DE SERVIÇOS ----------
+// Rampa ordinal de um hue só, mesma família do heatmap do IAF — os tipos de
+// serviço são categorias, não status, então nunca verde/amarelo/vermelho.
+const HIST_MIX_CORES = ['#2a78d6', '#6da7ec', '#b7d3f6', '#8f9aa8', '#c6ccd4'];
+
+function histRenderMix(ciclos) {
+  const el = $('histSvcMix');
+  if (!el) return;
+  const porLoja = {}, tipos = new Map();
+  for (const s of ciclos) {
+    for (const [pdv, mix] of Object.entries(s.servicosPorTipo || {})) {
+      if (!porLoja[pdv]) porLoja[pdv] = {};
+      for (const [tipo, q] of Object.entries(mix)) {
+        porLoja[pdv][tipo] = (porLoja[pdv][tipo] || 0) + nlz(q);
+        tipos.set(tipo, (tipos.get(tipo) || 0) + nlz(q));
+      }
+    }
+  }
+  if (!Object.keys(porLoja).length) {
+    el.innerHTML = `<div class="hist-empty">Sem mix de serviços no histórico — depende do relatório antigo, que trazia o nome do serviço por linha.</div>`;
+    return;
+  }
+  const ordemTipos = [...tipos.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  const cor = (t) => HIST_MIX_CORES[ordemTipos.indexOf(t) % HIST_MIX_CORES.length];
+
+  const linhas = Object.entries(porLoja)
+    .map(([pdv, mix]) => ({ pdv, mix, total: Object.values(mix).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total);
+
+  let html = '';
+  for (const { pdv, mix, total } of linhas) {
+    const nome = String(STORE_NAMES[pdv] || pdv).replace(/^Loja\s+/i, '');
+    const segs = ordemTipos.filter(t => mix[t]).map(t => {
+      const pct = (mix[t] / total) * 100;
+      return `<div class="hist-mix-seg" style="width:${pct}%; background:${cor(t)}" title="${histEsc(nome)} — ${histEsc(t)}: ${mix[t]} (${pct.toFixed(0)}%)">${pct >= 9 ? pct.toFixed(0) + '%' : ''}</div>`;
+    }).join('');
+    html += `<div class="hist-mix-row">
+      <div class="hist-mix-nome">${histEsc(nome)} <span style="color:var(--ink-dim); font-size:10px">${total}</span></div>
+      <div class="hist-mix-bar">${segs}</div></div>`;
+  }
+  html += `<div class="hist-mix-legend">` + ordemTipos.map(t =>
+    `<span><i style="background:${cor(t)}"></i>${histEsc(t)} · ${tipos.get(t)}</span>`).join('') + `</div>`;
+
+  // o que salta aos olhos: tipo que alguma loja simplesmente não faz
+  const ausentes = [];
+  for (const { pdv, mix } of linhas) {
+    for (const t of ordemTipos) {
+      if (tipos.get(t) >= 20 && !mix[t]) {
+        ausentes.push(`${String(STORE_NAMES[pdv] || pdv).replace(/^Loja\s+/i, '')} não registrou nenhum "${t}"`);
+      }
+    }
+  }
+  if (ausentes.length) html += `<div class="hist-aviso">· ${ausentes.map(a => histEsc(a)).join('<br>· ')}</div>`;
+  el.innerHTML = html;
+}
+
+// ---------- COMPARAR LOJAS / CONSULTORAS ----------
+const HIST_CMP_IND = {
+  receita:     { label: 'Receita',      tipo: 'moeda', somavel: true },
+  skin:        { label: 'Skin',         tipo: 'moeda', somavel: true },
+  servicos:    { label: 'Serviços',     tipo: 'int',   somavel: true },
+  boletoMedio: { label: 'Boleto Médio', tipo: 'moeda', somavel: false },
+  itensBoleto: { label: 'Itens/Boleto', tipo: 'dec',   somavel: false },
+  prm:         { label: 'PRM',          tipo: 'pct',   somavel: false },
+  turbinado:   { label: 'Turbinado',    tipo: 'pct',   somavel: false },
+  resgate:     { label: 'Resgate',      tipo: 'pct',   somavel: false },
+  iafPct:      { label: 'IAF %',        tipo: 'pct',   somavel: false, soConsultora: true },
+};
+let histCmpEscolhidos = { lojas: null, consultoras: null };
+
+function histCmpUniverso(ciclos, tipo) {
+  const m = new Map();
+  for (const s of ciclos) {
+    if (tipo === 'lojas') {
+      for (const pdv of Object.keys(s.lojas || {})) {
+        if (!m.has(pdv)) m.set(pdv, String(STORE_NAMES[pdv] || pdv).replace(/^Loja\s+/i, ''));
+      }
+    } else {
+      for (const [can, c] of Object.entries(s.consultoras || {})) {
+        if (!m.has(can)) m.set(can, c.nome || can);
+      }
+    }
+  }
+  return m;
+}
+
+function histRenderComparar(ciclos) {
+  const chartEl = $('histCmpChart'), tabEl = $('histCmpTabela');
+  const selEl = $('histCmpSel'), avisoEl = $('histCmpAviso');
+  if (!chartEl) return;
+  const tipo = $('histCmpTipo')?.value || 'lojas';
+
+  // indicadores válidos para o tipo escolhido
+  const indSel = $('histCmpInd');
+  const validos = Object.entries(HIST_CMP_IND).filter(([, c]) => tipo === 'consultoras' || !c.soConsultora);
+  const atual = indSel?.value;
+  if (indSel) {
+    indSel.innerHTML = validos.map(([k, c]) => `<option value="${k}">${c.label}</option>`).join('');
+    indSel.value = validos.some(([k]) => k === atual) ? atual : 'receita';
+  }
+  const ind = indSel?.value || 'receita';
+  const cfg = HIST_CMP_IND[ind];
+
+  const universo = histCmpUniverso(ciclos, tipo);
+  if (!universo.size) { chartEl.innerHTML = `<div class="hist-empty">Nada para comparar.</div>`; return; }
+
+  // seleção padrão: os 4 maiores do último ciclo — comparar 20 linhas não se lê
+  if (!histCmpEscolhidos[tipo]) {
+    const ult = ciclos[ciclos.length - 1] || {};
+    const fonte = tipo === 'lojas' ? (ult.lojas || {}) : (ult.consultoras || {});
+    histCmpEscolhidos[tipo] = new Set(
+      Object.entries(fonte).sort((a, b) => nlz(b[1].receita) - nlz(a[1].receita)).slice(0, 4).map(([k]) => k)
+    );
+    if (!histCmpEscolhidos[tipo].size) histCmpEscolhidos[tipo] = new Set([...universo.keys()].slice(0, 4));
+  }
+  const escolhidos = histCmpEscolhidos[tipo];
+
+  if (selEl) {
+    selEl.innerHTML = [...universo.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'))
+      .map(([k, nome]) => `<button class="hist-chip${escolhidos.has(k) ? ' on' : ''}" data-cmp="${histEsc(k)}">${histEsc(nome)}</button>`)
+      .join('') + `<span class="hist-chips-nota">clique para incluir ou tirar da comparação</span>`;
+  }
+
+  const norm = $('histCmpNorm')?.value || 'valor';
+  const valorBruto = (s, k) => {
+    const o = tipo === 'lojas' ? s.lojas?.[k] : s.consultoras?.[k];
+    if (!o) return null;
+    const v = o[ind];
+    if (v == null || !isFinite(v)) return null;
+    return ind === 'iafPct' ? v * 100 : v;
+  };
+
+  const series = [...escolhidos].filter(k => universo.has(k)).map((k, idx) => {
+    const brutos = ciclos.map(s => valorBruto(s, k));
+    let pontos;
+    if (norm === 'porDia' && cfg.somavel) {
+      pontos = brutos.map((v, i) => ({ i, v: (v == null || !ciclos[i].dias) ? null : v / ciclos[i].dias }));
+    } else if (norm === 'indice') {
+      const base = brutos.find(v => v != null && v !== 0);
+      pontos = brutos.map((v, i) => ({ i, v: (v == null || !base) ? null : (v / base) * 100 }));
+    } else {
+      pontos = brutos.map((v, i) => ({ i, v }));
+    }
+    return { nome: universo.get(k), chave: k, foco: idx === 0, pontos };
+  });
+
+  const labels = ciclos.map(s => ({ topo: `C${s.ciclo}`, base: s.dias ? `${s.dias}d` : '' }));
+  const tipoEixo = norm === 'indice' ? 'dec' : cfg.tipo;
+  chartEl.innerHTML = histChartXY(labels, series, {
+    tipo: tipoEixo, refLinha: norm === 'indice' ? 100 : null, refLabel: 'base',
+    aria: `Comparação de ${cfg.label}`, padR: 150,
+    vazio: 'Selecione pelo menos um item para comparar.',
+  });
+
+  // tabela: valor por ciclo + variação total
+  if (tabEl) {
+    let html = `<thead><tr><th>${tipo === 'lojas' ? 'Loja' : 'Consultora'}</th>${ciclos.map(s => `<th style="text-align:right">C${s.ciclo}</th>`).join('')}<th style="text-align:right">1º → último</th></tr></thead><tbody>`;
+    for (const s of series) {
+      const vals = s.pontos.map(p => p.v);
+      const prim = vals.find(v => v != null), ult = [...vals].reverse().find(v => v != null);
+      let delta = '—';
+      if (prim != null && ult != null && prim !== 0) {
+        const p = Math.round(((ult - prim) / prim) * 100);
+        delta = `<span class="${p > 0 ? 'hist-delta-up' : p < 0 ? 'hist-delta-down' : ''}">${p > 0 ? '+' : ''}${p}%</span>`;
+      }
+      html += `<tr><td>${histEsc(s.nome)}</td>` +
+        vals.map(v => `<td style="text-align:right; font-family:'JetBrains Mono',monospace">${v == null ? '—' : histFmt(v, tipoEixo)}</td>`).join('') +
+        `<td style="text-align:right; font-family:'JetBrains Mono',monospace">${delta}</td></tr>`;
+    }
+    tabEl.innerHTML = html + `</tbody>`;
+  }
+
+  const avisos = [];
+  if (norm === 'indice') avisos.push(`Índice: o primeiro ciclo com dado de cada linha vale 100, então o gráfico compara <b>evolução</b>, não tamanho — é assim que uma loja pequena e uma grande ficam comparáveis.`);
+  if (norm === 'porDia' && !cfg.somavel) avisos.push(`"${cfg.label}" é média ou percentual: dividir por dias não faria sentido, então o gráfico mostra o valor do ciclo.`);
+  if (tipo === 'consultoras') avisos.push(`Quem não estava na rede em um ciclo fica sem ponto ali — a linha corta.`);
+  if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
+}
+
+// ---------- CANAL DIGITAL ----------
+const HIST_DIG_TIPO = { receita: 'moeda', boletoMedio: 'moeda', conversao: 'pct', tme: 'dec' };
+const histTmeMin = (tme) => {
+  const m = String(tme || '').match(/(\d+):(\d+):(\d+)/);
+  return m ? (+m[1] * 60 + +m[2] + +m[3] / 60) : null;
+};
+
+function histRenderDigital(ciclos) {
+  const chartEl = $('histDigChart'), tabEl = $('histDigTabela');
+  const kpiEl = $('histDigKpis'), avisoEl = $('histDigAviso');
+  if (!chartEl) return;
+  const com = ciclos.filter(s => s.digital?.totals);
+  if (!com.length) {
+    chartEl.innerHTML = `<div class="hist-empty">Nenhum ciclo do histórico tem dados do canal digital.</div>`;
+    if (kpiEl) kpiEl.innerHTML = ''; if (tabEl) tabEl.innerHTML = '';
+    return;
+  }
+  const ind = $('histDigInd')?.value || 'receita';
+  const valor = (s) => {
+    const t = s.digital.totals;
+    if (ind === 'tme') return histTmeMin(t.tme);
+    if (ind === 'conversao') return nlz(t.conversao) * 100;
+    return nlz(t[ind]);
+  };
+
+  const labels = com.map(s => ({ topo: `C${s.ciclo}`, base: s.dias ? `${s.dias}d` : '' }));
+  chartEl.innerHTML = histChartXY(labels, [{
+    nome: '', foco: true, tracejado: false,
+    pontos: com.map((s, i) => ({ i, v: valor(s) })),
+  }], { tipo: HIST_DIG_TIPO[ind] || 'int', padR: 40, aria: 'Canal digital por ciclo' });
+
+  const ult = com[com.length - 1], pen = com.length > 1 ? com[com.length - 2] : null;
+  const t = ult.digital.totals;
+  // menorEhMelhor: no TME (tempo de espera) subir é PIORAR — pintar de verde um
+  // aumento de 27% na espera diria o contrário do que o número significa.
+  const delta = (f, menorEhMelhor) => {
+    if (!pen) return '';
+    const a = f(pen), b = f(ult);
+    if (!a || b == null) return '';
+    const p = Math.round(((b - a) / a) * 100);
+    if (!isFinite(p) || p === 0) return `<div class="hist-kpi-sub">igual ao C${pen.ciclo}</div>`;
+    const bom = menorEhMelhor ? p < 0 : p > 0;
+    return `<div class="hist-kpi-sub ${bom ? 'hist-delta-up' : 'hist-delta-down'}">${p > 0 ? '+' : ''}${p}% vs C${pen.ciclo}</div>`;
+  };
+  if (kpiEl) {
+    kpiEl.innerHTML = `<div class="hist-kpis">
+      <div class="hist-kpi"><div class="hist-kpi-label">Receita (C${ult.ciclo})</div>
+        <div class="hist-kpi-valor">${fmtBRL(nlz(t.receita))}</div>${delta(s => nlz(s.digital.totals.receita))}</div>
+      <div class="hist-kpi"><div class="hist-kpi-label">Encaminhados</div>
+        <div class="hist-kpi-valor">${histFmt(nlz(t.encaminhados), 'int')}</div>${delta(s => nlz(s.digital.totals.encaminhados))}</div>
+      <div class="hist-kpi"><div class="hist-kpi-label">Conversão</div>
+        <div class="hist-kpi-valor">${(nlz(t.conversao) * 100).toFixed(1).replace('.', ',')}%</div>${delta(s => nlz(s.digital.totals.conversao))}</div>
+      <div class="hist-kpi"><div class="hist-kpi-label">TME</div>
+        <div class="hist-kpi-valor">${histEsc(t.tme || '—')}</div>${delta(s => histTmeMin(s.digital.totals.tme), true)}</div>
+    </div>`;
+  }
+
+  if (tabEl) {
+    let html = `<thead><tr><th>Ciclo</th><th style="text-align:right">Encaminhados</th><th style="text-align:right">Atendidos</th>
+      <th style="text-align:right">Convertidos</th><th style="text-align:right">Conversão</th>
+      <th style="text-align:right">Receita</th><th style="text-align:right">Boleto Médio</th><th style="text-align:right">TME</th></tr></thead><tbody>`;
+    for (const s of com) {
+      const d = s.digital.totals;
+      html += `<tr><td style="font-weight:600">C${s.ciclo}</td>` +
+        [histFmt(nlz(d.encaminhados), 'int'), histFmt(nlz(d.atendidos), 'int'), histFmt(nlz(d.convertidos), 'int'),
+         (nlz(d.conversao) * 100).toFixed(1).replace('.', ',') + '%', fmtBRL(nlz(d.receita)), fmtBRL(nlz(d.boletoMedio)), d.tme || '—']
+          .map(v => `<td style="text-align:right; font-family:'JetBrains Mono',monospace">${histEsc(v)}</td>`).join('') + `</tr>`;
+    }
+    tabEl.innerHTML = html + `</tbody>`;
+  }
+
+  if (avisoEl) {
+    avisoEl.innerHTML = `· O canal digital <b>não soma</b> com a receita das lojas: as bases são diferentes (Receita Líquida x GMV). É o detalhe do indicador "Loja Digital Ativo" que cada loja já tem no Resumo.<br>
+      · TME é tempo médio de espera — aqui em minutos, para caber no gráfico.`;
+  }
 }
 
 // ---------- FICHA DA CONSULTORA ----------
@@ -6088,10 +6540,31 @@ document.addEventListener('DOMContentLoaded', () => {
   // Histórico: calendário dos ciclos (traduz período → número do ciclo) e os
   // controles da aba. O snapshot em si é agendado no fim de renderDashboard.
   loadCiclosCalendario();
+  // Histórico carregado cedo: o sparkline dos cards do painel diário depende dele,
+  // e sem isto ele só apareceria depois de alguém abrir a aba Histórico.
+  loadHistorico().then(() => {
+    if (selectedPdv) { try { renderDashboard(); } catch (e) {} }
+  });
   ['histIndicador', 'histModo', 'histRitmoInd', 'histRitmoModo',
-   'histSvcAgrup', 'histSvcLoja', 'histConsultora', 'histFechCiclo'].forEach(id => {
+   'histSvcAgrup', 'histSvcLoja', 'histConsultora', 'histFechCiclo',
+   'histCmpTipo', 'histCmpInd', 'histCmpNorm', 'histDigInd'].forEach(id => {
     const el = $(id);
     if (el) el.addEventListener('change', () => { try { renderHistoricoTab(); } catch (e) {} });
+  });
+
+  // Chips do comparador: alterna quem entra na comparação. Delegado porque a lista
+  // é remontada a cada render.
+  const cmpSel = $('histCmpSel');
+  if (cmpSel) cmpSel.addEventListener('click', (e) => {
+    const chip = e.target.closest('.hist-chip');
+    if (!chip) return;
+    const tipo = $('histCmpTipo')?.value || 'lojas';
+    const set = histCmpEscolhidos[tipo];
+    if (!set) return;
+    const k = chip.dataset.cmp;
+    if (set.has(k)) { if (set.size > 1) set.delete(k); }   // nunca deixa vazio
+    else set.add(k);
+    try { renderHistoricoTab(); } catch (err) {}
   });
 
   // Sub-navegação da aba Histórico. As views ficam todas montadas no DOM e só
