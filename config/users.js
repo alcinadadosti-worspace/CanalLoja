@@ -27,7 +27,7 @@ const ROLES = {
   master: {
     label: 'Acesso geral',
     allowedPdvs: '*',
-    tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos', 'digital'],
+    tabs: ['loja', 'hub', 'comparativo', 'ranking', 'servicos', 'digital', 'historico'],
     sections: ['dashboard'],
     editable: {
       global:  ['metaPRM', 'metaTurbinado', 'metaID', 'metaResgate', 'metaBBX'],

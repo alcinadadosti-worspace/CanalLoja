@@ -30,5 +30,8 @@ _*.js
 # Backups de metas (dados reais — não versionar)
 backups/
 
+# Saída do dry-run do import de histórico (snapshots com dados reais)
+.import-historico/
+
 # Logs / saídas
 *.log
