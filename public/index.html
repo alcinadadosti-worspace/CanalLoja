@@ -3693,7 +3693,7 @@ function renderDashboard() {
   // Card genérico — usado em ambas as grades.
   // histKey liga o card ao mesmo indicador no histórico: rende o sparkline de
   // contexto. Cards que não têm equivalente por loja (canal digital) passam nada.
-  const card = (label, value, sub, pct, rawNum, vsAnt, histKey) => {
+  const cardBase = (label, value, sub, pct, rawNum, vsAnt, histKey, pdvDoCard) => {
     let cls = 'dash-card', barCls = '';
     if (pct >= 1) { cls += ' success'; barCls = 'green'; }
     else if (pct >= 0.5) { cls += ' warn'; barCls = 'yellow'; }
@@ -3706,7 +3706,7 @@ function renderDashboard() {
       <div class="dash-card-sub">${sub}</div>
       ${barCls ? `<div class="dash-bar"><div class="dash-bar-fill ${barCls}" style="width:0%" data-target-width="${width}"></div></div>` : ''}
       ${fmtVsAnterior(vsAnt)}
-      ${histSparkline(selectedPdv, histKey)}
+      ${histSparkline(pdvDoCard || selectedPdv, histKey)}
     </div>`;
   };
 
@@ -3714,6 +3714,11 @@ function renderDashboard() {
   // Usado tanto pra grade da loja A quanto da loja B em modo comparação.
   const buildLojaCardsArray = (lojaEx, lojaPdv) => {
     const out = [];
+    // No modo "Comparar com", esta função monta também os cards da loja B. O
+    // sparkline tem que ser o histórico DESTA loja — usar selectedPdv mostraria
+    // a curva da loja A dentro do card da B.
+    const card = (label, value, sub, pct, rawNum, vsAnt, histKey) =>
+      cardBase(label, value, sub, pct, rawNum, vsAnt, histKey, lojaPdv);
     const va = lojaEx.loja.vsAnterior || {};
 
     out.push(card('Receita', fmtBRL(lojaEx.loja.receita),
@@ -4076,7 +4081,9 @@ function realizadoDaLoja(canonical, pdvPadrao, todasAsLojas) {
   const pdvs = LOJAS_DA_RESPONSAVEL[canonical] || [pdvPadrao];
   const linhas = pdvs.map(p => todasAsLojas[p]?.loja).filter(Boolean);
   if (!linhas.length) return null;
-  if (linhas.length === 1) return linhas[0];
+  // vsAnterior fica de fora: é a comparação da LOJA com o ano passado e não faz
+  // sentido colada no registro da consultora (nem deve engordar o snapshot).
+  if (linhas.length === 1) { const { vsAnterior, ...ind } = linhas[0]; return ind; }
   let receita = 0, boletos = 0, skin = 0, servicos = 0;
   let itensW = 0, turbW = 0, prmW = 0, resgW = 0, idW = 0, bbxW = 0;
   for (const l of linhas) {
