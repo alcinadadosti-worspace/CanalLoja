@@ -3865,11 +3865,28 @@ async function loadCiclosCalendario() {
   } catch (e) { /* sem calendário o histórico só não grava */ }
 }
 
+const dataDeHojeISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 async function loadHistorico() {
   try {
     const r = await fetch('/api/historico');
     historicoCache = r.ok ? await r.json() : {};
   } catch (e) { historicoCache = {}; }
+
+  // `fechado` é função de (fim do ciclo, hoje) e NÃO pode ficar congelado no valor
+  // que valia quando o snapshot foi gravado. Quem grava o ciclo 12 não volta para
+  // reescrever o 11: sem recalcular aqui, o ciclo 11 — gravado no dia 08/08 e
+  // encerrado em 09/08 — ficaria "em curso" para sempre. Isso contamina tudo que
+  // depende do estado: os alertas descartam ciclo não-fechado (o 11 sumiria da
+  // análise e o 10 viraria vizinho do 12), o heatmap nunca mostraria a medalha
+  // final e o Fechamento nunca ofereceria o ciclo como fechado.
+  const hoje = dataDeHojeISO();
+  for (const s of Object.values(historicoCache || {})) {
+    if (s && s.fim) s.fechado = hoje > s.fim;
+  }
 }
 
 async function loadSerieDiaria() {
@@ -5188,6 +5205,15 @@ function histRenderFechamento(ciclos) {
   if (!s.fechado) {
     html += `<div class="hist-alerta atencao" style="margin-bottom:16px"><span class="hist-alerta-ico">⏳</span>
       <span>O ciclo ${s.ciclo} <b>ainda está em curso</b> (${histEsc(s.periodo)}). Os números abaixo são o acumulado até a última carga de planilhas, não o resultado final.</span></div>`;
+  } else if (s.atualizadoEm && s.atualizadoEm.slice(0, 10) <= s.fim) {
+    // Ciclo encerrado cujo último snapshot foi tirado ANTES do fim: ninguém subiu
+    // as planilhas finais e o ciclo congelou no meio. Fácil de acontecer quando se
+    // pula direto para o ciclo seguinte, e o número passaria por resultado final.
+    const dia = s.atualizadoEm.slice(0, 10).split('-').reverse().join('/');
+    const fim = String(s.fim).split('-').reverse().join('/');
+    html += `<div class="hist-alerta grave" style="margin-bottom:16px"><span class="hist-alerta-ico">📌</span>
+      <span>Estes números são de <b>${dia}</b>, mas o ciclo ${s.ciclo} só terminou em <b>${fim}</b> — as planilhas finais nunca foram carregadas, então falta o movimento dos últimos dias.
+      Para corrigir, exporte o ciclo ${s.ciclo} com o filtro de período dele e suba pelo admin: o histórico regrava sozinho.</span></div>`;
   }
 
   // totais da rede
