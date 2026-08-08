@@ -4701,9 +4701,15 @@ function histCalcAlertas(ciclos) {
     const nome = STORE_NAMES[pdv] || `PDV ${pdv}`;
     const porDia = (x) => `${fmtBRL(x.v)}/dia`;
 
-    // quedas consecutivas até o último ciclo fechado
+    // Quedas consecutivas até o último ciclo fechado. "Seguidos" é uma afirmação
+    // sobre ADJACÊNCIA, então a contagem para quando a sequência tem buraco — um
+    // ciclo que ninguém subiu, ou uma loja que não operou naquele ciclo. Sem isto,
+    // C10 e C13 virariam vizinhos e o alerta diria "3 ciclos seguidos" sobre uma
+    // janela de seis.
+    const adjacente = (i) => serie[i].ciclo === serie[i - 1].ciclo + 1;
     let quedas = 0;
     for (let i = serie.length - 1; i > 0; i--) {
+      if (!adjacente(i)) break;
       if (serie[i].v < serie[i - 1].v) quedas++; else break;
     }
     if (quedas >= 3) {
@@ -4713,6 +4719,7 @@ function histCalcAlertas(ciclos) {
     }
     let altas = 0;
     for (let i = serie.length - 1; i > 0; i--) {
+      if (!adjacente(i)) break;
       if (serie[i].v > serie[i - 1].v) altas++; else break;
     }
     if (altas >= 3) {
@@ -4720,12 +4727,15 @@ function histCalcAlertas(ciclos) {
       out.push({ nivel: 'bom', ico: '📈',
         txt: `<b>${histEsc(nome)}</b> cresceu ${altas} ciclos seguidos, chegando a ${porDia(ate)} no C${ate.ciclo} (${fmtBRL(ate.bruto)} no ciclo).` });
     }
-    // último ciclo muito abaixo da própria média recente
+    // último ciclo muito abaixo da própria média recente — "os 3 ciclos anteriores"
+    // também só vale se os quatro forem mesmo seguidos
     if (serie.length >= 4) {
-      const base = serie.slice(-4, -1);
+      const ult4 = serie.slice(-4);
+      const contiguos = ult4.every((p, i) => i === 0 || p.ciclo === ult4[i - 1].ciclo + 1);
+      const base = ult4.slice(0, 3);
       const media = base.reduce((a, p) => a + p.v, 0) / base.length;
       const ult = serie[serie.length - 1];
-      if (media > 0 && ult.v < media * 0.8) {
+      if (contiguos && media > 0 && ult.v < media * 0.8) {
         out.push({ nivel: 'atencao', ico: '⚠️',
           txt: `<b>${histEsc(nome)}</b> fechou o C${ult.ciclo} em ${porDia(ult)}, ${Math.round((1 - ult.v / media) * 100)}% abaixo da própria média por dia dos 3 ciclos anteriores (${fmtBRL(media)}/dia).` });
       }
