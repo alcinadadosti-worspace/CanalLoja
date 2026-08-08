@@ -127,6 +127,16 @@
       }
     }
 
+    // storeLead:false EXPLICITO para quem nao e responsavel. O servidor faz MERGE
+    // do cadastro (`{...existente, ...novas}`), entao chave ausente e chave
+    // preservada: sem escrever o false, quem deixou de ser responsavel continuaria
+    // marcada para sempre, e a DM dela compararia o faturamento da LOJA INTEIRA
+    // contra a meta individual. Cenario real do ciclo 12: as metas voltam a ser
+    // individuais e so a Maryanna (Sao Sebastiao) segue respondendo pela loja.
+    for (const [n, m] of Object.entries(all)) {
+      if (!m.storeLead) m.storeLead = false;
+    }
+
     // JÚNIOR → JOSENILDO (a planilha usa o apelido em algumas abas)
     if (all['JÚNIOR']) { all['JOSENILDO'] = { ...(all['JOSENILDO'] || {}), ...all['JÚNIOR'] }; delete all['JÚNIOR']; }
     if (all['JUNIOR']) { all['JOSENILDO'] = { ...(all['JOSENILDO'] || {}), ...all['JUNIOR'] }; delete all['JUNIOR']; }
