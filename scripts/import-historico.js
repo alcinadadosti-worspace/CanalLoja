@@ -56,13 +56,28 @@ function comissaoDoCiclo(num) {
   return f ? path.join(dir, f) : null;
 }
 
-function arquivosDoCiclo(pasta, num) {
+// Log de servicos do ANO no formato v1 (com DATA REALIZACAO). O relatorio novo
+// (v2, "Servicos_em_loja") vem somado por ciclo e sem data, entao a serie diaria
+// so existe se este log for junto. Ele cobre 29/12/2025 a 20/07/2026 — dai em
+// diante a granularidade diaria so vem da captura continua (/api/serie-diaria).
+function logServicosV1() {
+  for (const dir of ['ciclo-11', 'ciclo-10', 'ciclo-09', 'ciclo-08']) {
+    const d = path.join(CICLOS_DIR, dir);
+    if (!fs.existsSync(d)) continue;
+    const f = fs.readdirSync(d).find(n => /ServicosLoja_Servicos_Realizados/i.test(n) && !n.startsWith('~'));
+    if (f) return path.join(d, f);
+  }
+  return null;
+}
+
+function arquivosDoCiclo(pasta, num, logV1) {
   const dir = path.join(HIST_DIR, pasta);
   const files = fs.readdirSync(dir)
     .filter(n => /\.xlsx$/i.test(n) && !n.startsWith('~') && !n.startsWith('.'))
     .map(n => path.join(dir, n));
   const com = comissaoDoCiclo(num);
   if (com) files.push(com);
+  if (logV1) files.push(logV1);
   return { files, temComissao: !!com };
 }
 
@@ -101,9 +116,13 @@ function arquivosDoCiclo(pasta, num) {
     document.body.appendChild(i);
   });
 
+  const logV1 = logServicosV1();
+  if (logV1) console.log(`Log de servicos v1 (serie diaria): ${path.basename(logV1)}\n`);
+  else console.log('AVISO: log de servicos v1 nao encontrado — os ciclos entram sem serie diaria de servicos.\n');
+
   const resultados = [];
   for (const { nome, num } of pastas) {
-    const { files, temComissao } = arquivosDoCiclo(nome, num);
+    const { files, temComissao } = arquivosDoCiclo(nome, num, logV1);
     process.stdout.write(`Ciclo ${String(num).padStart(2, '0')} · ${files.length} arquivo(s)${temComissao ? ' +comissao' : ' SEM comissao'} ... `);
 
     await page.setInputFiles('#__histInput', files);
@@ -130,6 +149,8 @@ function arquivosDoCiclo(pasta, num) {
       delete res.snapshot;
     }
     const avisos = [];
+    if (res.diasServicos) avisos.push(`serie diaria: ${res.diasServicos} dia(s) com servico`);
+    else avisos.push('SEM serie diaria de servicos');
     if (res.semMetas) avisos.push('SEM METAS (so realizado)');
     if (res.faltando?.length) avisos.push(`faltam planilhas: ${res.faltando.join(',')}`);
     if (res.ambiguas?.length) avisos.push(`consultora sem PDV: ${res.ambiguas.join(', ')}`);

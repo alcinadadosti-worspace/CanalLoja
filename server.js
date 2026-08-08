@@ -31,6 +31,7 @@ const metaStore = { ...META_DEFAULTS };
 const storeMetasStore = {};
 const sellerMetasStore = {};
 const historicoStore = {};   // { "<ciclo>": snapshot } — ver /api/historico
+const serieDiariaStore = {}; // { "<ciclo>": { "<dia>": { "<pdv>": {...} } } } — ver /api/serie-diaria
 
 // Calendario dos ciclos (datas oficiais do Boticario). O app so conhece a string
 // de periodo da aba FILTROS das planilhas; este mapa e quem diz "isso e o ciclo 10".
@@ -306,6 +307,12 @@ app.post('/api/historico', requireAnyAuth, async (req, res) => {
     consultoras: s.consultoras,
     digital: s.digital || null,
     metasGlobais: s.metasGlobais || null,
+    // Servicos por dia so vem do relatorio v1 (com DATA REALIZACAO). A producao usa
+    // o v2, que nao tem data — entao o snapshot 'auto' NAO produz esta serie e nao
+    // pode apagar a que o import retroativo gravou. Preserva a existente.
+    servicosPorDia: (s.servicosPorDia && typeof s.servicosPorDia === 'object' && Object.keys(s.servicosPorDia).length)
+      ? s.servicosPorDia
+      : (existente?.servicosPorDia || null),
     // ciclos 1-7 nao tem planilha de comissao — o front marca aqui pra UI
     // mostrar "—" em vez de 0% nas colunas de atingimento e segmento.
     semMetas: !!s.semMetas,
@@ -315,6 +322,68 @@ app.post('/api/historico', requireAnyAuth, async (req, res) => {
   catch (e) { console.warn('[supabase] historico:', e.message); backupOk = false; }
   const resp = { ok: true, ciclo, ciclos: Object.keys(historicoStore).length, substituiu: !!existente };
   if (!backupOk) resp.warning = 'Snapshot salvo em memoria, mas backup na nuvem falhou.';
+  res.json(resp);
+});
+
+// ---------- Serie diaria (curva de ritmo dentro do ciclo) ----------
+// Uma foto por dia do ACUMULADO do ciclo. O snapshot do historico guarda so o
+// estado final; sem isto a trajetoria DENTRO do ciclo se perde a cada upload,
+// e "no dia 10 de 21, 45% da meta e bom ou ruim?" fica sem resposta.
+// Nao ha reconstrucao possivel depois — por isso grava desde o primeiro upload.
+app.get('/api/serie-diaria', requireAnyAuth, (req, res) => {
+  res.json({ ...serieDiariaStore });
+});
+
+const SERIE_MAX_DIAS = 45;        // ciclo mais longo tem 28 dias; folga pra erro de calendario
+const SERIE_MAX_CICLOS = 40;
+
+app.post('/api/serie-diaria', requireAnyAuth, async (req, res) => {
+  const b = req.body || {};
+  const ciclo = parseInt(b.ciclo, 10);
+  if (!Number.isInteger(ciclo) || ciclo < 1 || ciclo > 40) {
+    return res.status(400).json({ error: 'ciclo_invalido' });
+  }
+  if (typeof b.dia !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.dia)) {
+    return res.status(400).json({ error: 'dia_invalido' });
+  }
+  if (typeof b.lojas !== 'object' || !b.lojas) {
+    return res.status(400).json({ error: 'payload_invalido' });
+  }
+  // So numeros, so os campos previstos: o payload vem do navegador e este arquivo
+  // e lido inteiro pela aba — nao pode virar deposito de qualquer coisa.
+  const lojas = {};
+  for (const [pdv, v] of Object.entries(b.lojas)) {
+    if (!/^\d{4,6}$/.test(pdv) || typeof v !== 'object' || !v) continue;
+    const reg = {};
+    for (const k of ['receita', 'skin', 'servicos', 'boletos']) {
+      const n = Number(v[k]);
+      if (Number.isFinite(n)) reg[k] = Math.round(n * 100) / 100;
+    }
+    if (Object.keys(reg).length) lojas[pdv] = reg;
+  }
+  if (!Object.keys(lojas).length) return res.status(400).json({ error: 'sem_lojas_validas' });
+
+  const key = String(ciclo);
+  if (!serieDiariaStore[key]) serieDiariaStore[key] = {};
+  // Reescreve o ponto do dia: varios uploads no mesmo dia devem deixar o ultimo,
+  // que e o acumulado mais completo daquele dia.
+  serieDiariaStore[key][b.dia] = lojas;
+
+  // Poda: mantem os dias mais recentes do ciclo e os ciclos mais recentes.
+  const dias = Object.keys(serieDiariaStore[key]).sort();
+  for (const d of dias.slice(0, Math.max(0, dias.length - SERIE_MAX_DIAS))) {
+    delete serieDiariaStore[key][d];
+  }
+  const ciclos = Object.keys(serieDiariaStore).map(Number).sort((a, b2) => a - b2);
+  for (const c of ciclos.slice(0, Math.max(0, ciclos.length - SERIE_MAX_CICLOS))) {
+    delete serieDiariaStore[String(c)];
+  }
+
+  let backupOk = true;
+  try { await supa.saveSerieDiaria({ ...serieDiariaStore }); }
+  catch (e) { console.warn('[supabase] serie-diaria:', e.message); backupOk = false; }
+  const resp = { ok: true, ciclo, dia: b.dia, dias: Object.keys(serieDiariaStore[key]).length };
+  if (!backupOk) resp.warning = 'Ponto salvo em memoria, mas backup na nuvem falhou.';
   res.json(resp);
 });
 
@@ -450,6 +519,13 @@ async function restoreFromSupabase() {
     const hist = await supa.getHistorico();
     Object.assign(historicoStore, hist);
     if (Object.keys(hist).length) console.log(`[supabase] historico restaurado (${Object.keys(hist).length} ciclo(s))`);
+
+    const serie = await supa.getSerieDiaria();
+    Object.assign(serieDiariaStore, serie);
+    if (Object.keys(serie).length) {
+      const pts = Object.values(serie).reduce((n, c) => n + Object.keys(c).length, 0);
+      console.log(`[supabase] serie diaria restaurada (${Object.keys(serie).length} ciclo(s), ${pts} dia(s))`);
+    }
 
     const filesMeta = await supa.getFilesMeta();
     let count = 0;

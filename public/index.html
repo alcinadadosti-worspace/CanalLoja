@@ -967,6 +967,43 @@
   .hist-iaf-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; color: var(--ink-mute); align-items: center; }
   .hist-iaf-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 5px; }
 
+  /* sub-navegação da aba Histórico */
+  .hist-subnav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .hist-subtab {
+    background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
+    color: var(--ink-mute); font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.04em; padding: 8px 14px; margin-bottom: -1px; transition: color .15s, border-color .15s;
+  }
+  .hist-subtab:hover { color: var(--ink); }
+  .hist-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* alertas de tendência */
+  .hist-alertas { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+  .hist-alerta {
+    display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.5;
+    padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--line);
+    background: var(--bg-2); color: var(--ink);
+  }
+  .hist-alerta b { font-weight: 600; }
+  .hist-alerta.grave { border-left: 3px solid var(--red); }
+  .hist-alerta.atencao { border-left: 3px solid var(--yellow); }
+  .hist-alerta.bom { border-left: 3px solid var(--green); }
+  .hist-alerta-ico { font-size: 14px; line-height: 1.2; }
+  .hist-alertas-vazio { font-size: 12px; color: var(--ink-mute); margin-bottom: 18px; }
+
+  /* ficha da consultora + fechamento */
+  .hist-kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .hist-kpi {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px;
+    background: var(--bg-2); min-width: 130px;
+  }
+  .hist-kpi-label { font-size: 10px; color: var(--ink-mute); letter-spacing: 0.05em; text-transform: uppercase; }
+  .hist-kpi-valor { font-size: 17px; font-family: 'JetBrains Mono', monospace; color: var(--ink); margin-top: 3px; }
+  .hist-kpi-sub { font-size: 10px; color: var(--ink-dim); margin-top: 2px; }
+  .hist-delta-up { color: var(--green); }
+  .hist-delta-down { color: var(--red); }
+  .hist-fech-titulo { font-size: 13px; color: var(--ink); margin: 18px 0 8px; font-weight: 600; }
+
   /* hub mega card */
   .hub-card {
     background: linear-gradient(135deg, var(--bg-2) 0%, var(--bg-3) 100%);
@@ -1579,6 +1616,100 @@
 
     <!-- TAB 7: HISTÓRICO POR CICLO -->
     <div class="dash-tab-content" data-tab-content="historico">
+      <div id="histAlertas"></div>
+
+      <div class="hist-subnav" id="histSubnav">
+        <button class="hist-subtab active" data-hview="evolucao">Evolução</button>
+        <button class="hist-subtab" data-hview="ritmo">Ritmo do ciclo</button>
+        <button class="hist-subtab" data-hview="servicos">Serviços por dia</button>
+        <button class="hist-subtab" data-hview="consultora">Ficha da consultora</button>
+        <button class="hist-subtab" data-hview="fechamento">Fechamento</button>
+      </div>
+
+      <!-- VIEW: RITMO -->
+      <div class="hist-view" data-hview-content="ritmo" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">⏱️ Ritmo dentro do ciclo — a mesma loja, no mesmo dia do ciclo, em cada ciclo</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Indicador</span>
+              <select id="histRitmoInd">
+                <option value="receita">Receita</option>
+                <option value="skin">Skin</option>
+                <option value="servicos">Serviços</option>
+                <option value="boletos">Boletos</option>
+              </select>
+            </label>
+            <label class="hist-ctl">
+              <span>Mostrar</span>
+              <select id="histRitmoModo">
+                <option value="pctMeta">% da meta acumulado</option>
+                <option value="valor">Valor acumulado</option>
+              </select>
+            </label>
+          </div>
+          <div id="histRitmoChart"></div>
+          <div id="histRitmoAviso" class="hist-aviso"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: SERVIÇOS POR DIA -->
+      <div class="hist-view" data-hview-content="servicos" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">🗓️ Serviços por dia — a única série diária que existe no histórico</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Agrupar por</span>
+              <select id="histSvcAgrup">
+                <option value="dia">Dia</option>
+                <option value="semana">Dia da semana</option>
+              </select>
+            </label>
+            <label class="hist-ctl">
+              <span>Loja</span>
+              <select id="histSvcLoja">
+                <option value="">Todas as lojas</option>
+              </select>
+            </label>
+          </div>
+          <div id="histSvcChart"></div>
+          <div id="histSvcAviso" class="hist-aviso"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: FICHA DA CONSULTORA -->
+      <div class="hist-view" data-hview-content="consultora" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">👤 Trajetória da consultora ao longo dos ciclos</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Consultora</span>
+              <select id="histConsultora"></select>
+            </label>
+          </div>
+          <div id="histConsResumo"></div>
+          <div id="histConsChart"></div>
+          <div class="hub-table-wrap"><table class="hub-table" id="histConsTabela"></table></div>
+          <div id="histConsAviso" class="hist-aviso"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: FECHAMENTO -->
+      <div class="hist-view" data-hview-content="fechamento" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">🏁 Fechamento do ciclo</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Ciclo</span>
+              <select id="histFechCiclo"></select>
+            </label>
+          </div>
+          <div id="histFechamento"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: EVOLUÇÃO (a original) -->
+      <div class="hist-view" data-hview-content="evolucao">
       <div class="dash-section">
         <div class="dash-section-title">📈 Evolução por ciclo — a loja selecionada em destaque, as demais como contexto</div>
         <div class="hist-controls">
@@ -1592,7 +1723,6 @@
               <option value="servicos">Serviços</option>
               <option value="prm">PRM</option>
               <option value="turbinado">Turbinado</option>
-              <option value="idCliente">ID Cliente</option>
               <option value="resgate">Resgate</option>
               <option value="bbx">Desafio BBX</option>
             </select>
@@ -1616,6 +1746,7 @@
       <div class="dash-section">
         <div class="dash-section-title">Números por ciclo — loja selecionada</div>
         <div class="hub-table-wrap"><table class="hub-table" id="histTabela"></table></div>
+      </div>
       </div>
     </div>
   </section>
@@ -2693,6 +2824,8 @@ function extractAll(pdv, sellers) {
   // Loja (from PDV sheet)
   const loja = {
     receita: nlz(pdvRow[RESUMO_PDV_COLS.receita]),
+    // quantidade de boletos: usada pela curva de ritmo (volume de vendas por dia)
+    boletos: nlz(pdvRow[RESUMO_PDV_COLS.boletos]),
     boletoMedio: nlz(pdvRow[RESUMO_PDV_COLS.boletoMedio]),
     itensBoleto: nlz(pdvRow[RESUMO_PDV_COLS.itensBoleto]),
     turbinado: nlz(pdvRow[RESUMO_PDV_COLS.turbinado]) * 100,
@@ -3057,6 +3190,38 @@ function makeServiceCycleFilter() {
     const d = parseServiceDate(dateVal);
     return !d || (d >= start && (!end || d <= end));
   };
+}
+
+// Serviços POR DIA dentro da janela do ciclo: { "YYYY-MM-DD": { "<pdv>": qtd } }.
+// Só existe no relatório v1 ("ServicosLoja_Servicos_Realizados"), que traz uma linha
+// por serviço+dia com DATA REALIZACAO. O v2 (31/07/2026 em diante) vem pré-agregado
+// pelo ciclo, sem data nenhuma — aí devolve null e quem chama mostra o porquê.
+// É a ÚNICA granularidade diária que dá para reconstruir do passado: os outros
+// relatórios (Resumo, Cuidados, Fidelidade, Digital) vêm somados, sem data.
+// wbKey: por padrão a planilha de serviços do ciclo. O import retroativo passa
+// 'servicosLogV1' — o log do ano, que é v1 e tem data — mantendo a planilha do
+// ciclo (v2, pré-somada) como fonte dos TOTAIS, que já estão validados.
+function servicosPorDiaDoCiclo(wbKey) {
+  const rows = getSheet(wbKey || 'servicosRealizados', 'PDV');
+  if (!rows || !svcIsV1(rows)) return null;
+  const C = SVC_COLS.v1.pdv;
+  const inCycle = makeServiceCycleFilter();
+  const out = {};
+  for (const r of rows.slice(1)) {
+    if (!r) continue;
+    const pdv = String(r[C.pdv] || '').trim();
+    if (!/^\d{4,6}$/.test(pdv)) continue;
+    const bruto = r[C.data];
+    if (!inCycle(bruto)) continue;
+    const d = parseServiceDate(bruto);
+    if (!d) continue;
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const q = nlz(r[C.qtd]);
+    if (!q) continue;
+    if (!out[iso]) out[iso] = {};
+    out[iso][pdv] = (out[iso][pdv] || 0) + q;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 // Segmento IAF "fecha" no ultimo dia do ciclo (data de fim vem da planilha).
@@ -3690,6 +3855,7 @@ function extractAllStores() {
 // =====================================================================
 let ciclosCalendario = [];
 let historicoCache = null;
+let serieDiariaCache = null;
 let _snapshotAgendado = false;
 
 async function loadCiclosCalendario() {
@@ -3704,6 +3870,13 @@ async function loadHistorico() {
     const r = await fetch('/api/historico');
     historicoCache = r.ok ? await r.json() : {};
   } catch (e) { historicoCache = {}; }
+}
+
+async function loadSerieDiaria() {
+  try {
+    const r = await fetch('/api/serie-diaria');
+    serieDiariaCache = r.ok ? await r.json() : {};
+  } catch (e) { serieDiariaCache = {}; }
 }
 
 // "29/06/2026 - 19/07/2026" → entrada do calendário, casando pela data de INÍCIO
@@ -3811,6 +3984,8 @@ function buildCicloSnapshot() {
     fechado: hojeISO > ciclo.fim,
     lojas, consultoras, digital, metasGlobais: g,
     semMetas: !temAlgumaMeta,
+    // null quando só existe o relatório v2, que não traz data
+    servicosPorDia: servicosPorDiaDoCiclo('servicosLogV1') || servicosPorDiaDoCiclo(),
   };
 }
 
@@ -3825,7 +4000,7 @@ async function salvarSnapshotCiclo(origem) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return { ok: false, motivo: j.error || 'erro', message: j.message };
     historicoCache = null;   // força recarregar do servidor na próxima render
-    return { ok: true, ciclo: snap.ciclo, substituiu: j.substituiu };
+    return { ok: true, ciclo: snap.ciclo, substituiu: j.substituiu, snapshot: snap };
   } catch (e) {
     return { ok: false, motivo: e.message };
   }
@@ -3948,7 +4123,20 @@ async function importarCicloRetroativo(fileList, opts) {
       try { wb = XLSX.read(await f.arrayBuffer(), { type: 'array' }); }
       catch (e) { return { ok: false, motivo: `erro lendo ${f.name}: ${e.message}` }; }
       const key = classifyFile(f.name);
-      if (key) loadedWorkbooks[key] = wb;
+      if (key === 'servicosRealizados') {
+        // Os dois formatos de Serviços caem nesta chave. O v1 (log do ano, com
+        // DATA REALIZACAO) vai para um slot próprio e alimenta só a série diária;
+        // o v2, pré-somado pelo ciclo, segue como fonte dos totais. Se só houver
+        // o v1, ele faz os dois papéis — era assim antes do relatório mudar.
+        const ehV1 = svcIsV1(XLSX.utils.sheet_to_json(wb.Sheets['PDV'] || {}, { header: 1, defval: '' }));
+        if (ehV1) {
+          loadedWorkbooks.servicosLogV1 = wb;
+          if (!loadedWorkbooks.servicosRealizados) loadedWorkbooks.servicosRealizados = wb;
+        } else {
+          loadedWorkbooks.servicosRealizados = wb;
+        }
+      }
+      else if (key) loadedWorkbooks[key] = wb;
       else if (/comiss|metas/i.test(f.name)) comWb = wb;
       else naoReconhecidos.push(f.name);
     }
@@ -3987,7 +4175,15 @@ async function importarCicloRetroativo(fileList, opts) {
         sellerMetas[nomeCurto] = { ...m, pdv };
       }
       window._serverSellerMetas = sellerMetas;
-      window._serverStoreMetas = ComissaoParser.derivarMetasDeLoja(sellerMetas);
+      // Arredonda como o admin faz ao persistir em _store_metas (String(Math.round)).
+      // Sem isto o mesmo ciclo teria meta com centavos diferentes conforme o caminho
+      // que gravou — o snapshot automático lê o cadastro, já inteiro.
+      const metasLoja = ComissaoParser.derivarMetasDeLoja(sellerMetas);
+      for (const m of Object.values(metasLoja)) {
+        m.receitaLoja = Math.round(m.receitaLoja);
+        m.skinLoja = Math.round(m.skinLoja);
+      }
+      window._serverStoreMetas = metasLoja;
       const MAP = { prm:'metaPRM', turbinado:'metaTurbinado', idCliente:'metaID',
                     resgate:'metaResgate', nps:'metaNPS', auditoria:'metaAuditoria',
                     itensBoleto:'metaItensBoleto' };
@@ -4014,6 +4210,7 @@ async function importarCicloRetroativo(fileList, opts) {
       lojas: Object.keys(snap.lojas).length,
       consultoras: Object.keys(snap.consultoras).length,
       semMetas: snap.semMetas, faltando, ambiguas, naoReconhecidos,
+      diasServicos: snap.servicosPorDia ? Object.keys(snap.servicosPorDia).length : 0,
     };
 
     if (dryRun) return { ...resumo, dryRun: true, snapshot: snap };
@@ -4038,6 +4235,41 @@ async function importarCicloRetroativo(fileList, opts) {
 }
 window.importarCicloRetroativo = importarCicloRetroativo;
 
+// Grava a foto de HOJE do acumulado do ciclo (item separado do snapshot: o
+// snapshot guarda 1 registro por ciclo, este guarda 1 por dia). É o que permite
+// comparar "dia 10 de 21" entre ciclos. Só faz sentido no ciclo em curso — em
+// ciclo fechado o acumulado não muda mais e o ponto seria uma data mentirosa.
+async function registrarPontoDiario(snap) {
+  if (!snap || snap.fechado) return { ok: false, motivo: 'ciclo_fechado' };
+  const hoje = new Date();
+  const dia = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  // Fora da janela do ciclo (planilha velha aberta em outro dia) o ponto mentiria
+  // sobre o dia-do-ciclo, que é o eixo inteiro da curva de ritmo.
+  if (snap.inicio && dia < snap.inicio) return { ok: false, motivo: 'fora_do_ciclo' };
+  if (snap.fim && dia > snap.fim) return { ok: false, motivo: 'fora_do_ciclo' };
+
+  const lojas = {};
+  for (const [pdv, l] of Object.entries(snap.lojas || {})) {
+    lojas[pdv] = {
+      receita: nlz(l.receita), skin: nlz(l.skin),
+      servicos: nlz(l.servicos), boletos: nlz(l.boletos),
+    };
+  }
+  if (!Object.keys(lojas).length) return { ok: false, motivo: 'sem_lojas' };
+  try {
+    const r = await fetch('/api/serie-diaria', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ciclo: snap.ciclo, dia, lojas }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, motivo: j.error || 'erro' };
+    serieDiariaCache = null;
+    return { ok: true, dia, dias: j.dias };
+  } catch (e) {
+    return { ok: false, motivo: e.message };
+  }
+}
+
 // Dispara uma vez por carga de planilhas, depois que tudo já está calculado.
 function agendarSnapshotAuto() {
   // Só quem enxerga TODAS as lojas pode gravar o snapshot: extractAllStores()
@@ -4050,6 +4282,11 @@ function agendarSnapshotAuto() {
     const r = await salvarSnapshotCiclo('auto');
     if (r.ok) {
       logDebug(`✓ Histórico: ciclo ${r.ciclo} ${r.substituiu ? 'atualizado' : 'salvo'}`, 'ok');
+      // Ponto do dia para a curva de ritmo. Falha aqui não invalida o snapshot,
+      // que é o dado principal — por isso só loga.
+      const p = await registrarPontoDiario(r.snapshot);
+      if (p.ok) logDebug(`✓ Ritmo: ponto de ${p.dia.split('-').reverse().join('/')} gravado (${p.dias} dia(s) neste ciclo)`, 'ok');
+      else if (p.motivo && p.motivo !== 'ciclo_fechado') logDebug(`Ritmo: ponto do dia não gravado (${p.motivo}).`);
       try { renderHistoricoTab(); } catch (e) {}
     } else if (r.motivo === 'periodo_nao_e_ciclo') {
       logDebug('Histórico: período das planilhas não corresponde a um ciclo do calendário — snapshot não gravado.');
@@ -4068,7 +4305,9 @@ const HIST_INDICADORES = {
   servicos:    { label: 'Serviços',     tipo: 'int',                              somavel: true  },
   prm:         { label: 'PRM',          tipo: 'pct',   metaGlobal: 'prm',         somavel: false },
   turbinado:   { label: 'Turbinado',    tipo: 'pct',   metaGlobal: 'turbinado',   somavel: false },
-  idCliente:   { label: 'ID Cliente',   tipo: 'pct',   metaGlobal: 'idCliente',   somavel: false },
+  // ID Cliente fora do histórico a pedido do Eduardo (08/08/2026): o indicador
+  // diverge na origem e a escala muda entre as abas PDV e CONSULTOR do Resumo,
+  // então a série por ciclo não era confiável. Segue no painel do ciclo atual.
   resgate:     { label: 'Resgate',      tipo: 'pct',   metaGlobal: 'resgate',     somavel: false },
   bbx:         { label: 'Desafio BBX',  tipo: 'pct',   metaGlobal: 'bbx',         somavel: false },
 };
@@ -4094,10 +4333,13 @@ function renderHistoricoTab() {
   if (!wrap) return;
   // Primeira render: busca o histórico e volta aqui. loadHistorico() sempre deixa
   // historicoCache como objeto (nunca null), então não há risco de loop.
-  if (historicoCache === null) {
+  if (historicoCache === null || serieDiariaCache === null) {
     wrap.className = '';
     wrap.innerHTML = `<div class="hist-empty">Carregando histórico…</div>`;
-    loadHistorico().then(() => { try { renderHistoricoTab(); } catch (e) {} });
+    Promise.all([
+      historicoCache === null ? loadHistorico() : null,
+      serieDiariaCache === null ? loadSerieDiaria() : null,
+    ]).then(() => { try { renderHistoricoTab(); } catch (e) {} });
     return;
   }
   const hist = historicoCache || {};
@@ -4111,13 +4353,43 @@ function renderHistoricoTab() {
     if (iafEl) iafEl.innerHTML = '';
     if (tabEl) tabEl.innerHTML = '';
     if (avisoEl) avisoEl.textContent = '';
+    if ($('histAlertas')) $('histAlertas').innerHTML = '';
     return;
   }
 
+  // Views que existem fora da Evolução. Preenche os selects antes de renderizar,
+  // senão a primeira abertura vem com o select vazio e a view em branco.
+  if ($('histAlertas')) histRenderAlertas($('histAlertas'), ciclos);
+  histPreencherConsultoras(ciclos);
+  histPreencherFechamento(ciclos);
+  histPreencherLojasServicos(ciclos);
+  try { histRenderRitmo(ciclos); } catch (e) { console.error('hist ritmo:', e); }
+  try { histRenderServicos(ciclos); } catch (e) { console.error('hist servicos:', e); }
+  try { histRenderConsultora(ciclos); } catch (e) { console.error('hist consultora:', e); }
+  try { histRenderFechamento(ciclos); } catch (e) { console.error('hist fechamento:', e); }
+
   const key = $('histIndicador')?.value || 'receita';
-  const modo = $('histModo')?.value || 'valor';
   const cfg = HIST_INDICADORES[key];
   const pdvFoco = selectedPdv;
+
+  // Nem todo indicador aceita todo modo. Em vez de deixar escolher e devolver um
+  // gráfico vazio (era o caso de Boleto Médio, Itens/Boleto, PRM, Turbinado,
+  // Resgate e BBX em "por dia"), a opção impossível fica desabilitada e a seleção
+  // cai no modo válido mais próximo.
+  const temMeta = ciclos.some(s => histMetaDe(s, pdvFoco, key));
+  const modoSel = $('histModo');
+  let modo = modoSel?.value || 'valor';
+  if (modoSel) {
+    const podePorDia = !!cfg.somavel;
+    for (const opt of modoSel.options) {
+      if (opt.value === 'porDia') opt.disabled = !podePorDia;
+      if (opt.value === 'pctMeta') opt.disabled = !temMeta;
+    }
+    if ((modo === 'porDia' && !podePorDia) || (modo === 'pctMeta' && !temMeta)) {
+      modo = 'valor';
+      modoSel.value = 'valor';
+    }
+  }
 
   // ---- séries por loja ----
   const pdvsSet = new Set();
@@ -4159,8 +4431,11 @@ function renderHistoricoTab() {
     const u = ciclos[ciclos.length - 1];
     avisos.push(`O ciclo ${u.ciclo} ainda está em curso (${u.periodo}): o último ponto é acumulado parcial — por isso vem tracejado — e não é comparável com os ciclos fechados.`);
   }
-  if (modo === 'porDia' && !cfg.somavel) {
-    avisos.push(`"${cfg.label}" é média/percentual — dividir pelo número de dias não teria significado, então as linhas ficam vazias. Use "Valor realizado".`);
+  if (!cfg.somavel) {
+    avisos.push(`"${cfg.label}" é média ou percentual, não um total que se acumula — por isso "Valor por dia do ciclo" fica indisponível para ele (dividir uma média pelos dias não significa nada).`);
+  }
+  if (!temMeta) {
+    avisos.push(`Nenhum ciclo do histórico tem meta de ${cfg.label} cadastrada — "% da meta" fica indisponível.`);
   }
   const semMeta = modo === 'pctMeta' ? ciclos.filter(s => !histMetaDe(s, pdvFoco, key)) : [];
   if (semMeta.length) {
@@ -4235,10 +4510,13 @@ function histLineChart(ciclos, series, opts) {
     } else {
       svg += linha(pts, false);
     }
-    if (s.foco) {
+    // Série com UM ponto só: polyline de um ponto não desenha nada. Acontece quando
+    // o indicador tem meta em um único ciclo (o BBX, cuja meta não vem da comissão)
+    // — sem o círculo, a linha some e parece que não há dado.
+    if (s.foco || pts.length === 1) {
       pts.forEach(p => {
         const parcial = opts.ultimoAberto && p.i === ciclos.length - 1;
-        svg += `<circle cx="${x(p.i)}" cy="${y(p.v)}" r="4" fill="${parcial ? 'var(--bg-2)' : cor}" stroke="${cor}" stroke-width="2"/>`;
+        svg += `<circle cx="${x(p.i)}" cy="${y(p.v)}" r="4" fill="${parcial ? 'var(--bg-2)' : cor}" stroke="${cor}" stroke-width="2" opacity="${s.foco ? 1 : 0.55}"/>`;
       });
     }
     const ult = pts[pts.length - 1];
@@ -4379,6 +4657,615 @@ function histRenderIaf(el, ciclos) {
     html += `<div class="hist-aviso">· ${semIaf.length} consultora(s) fora deste quadro por não terem segmento apurado em nenhum ciclo — o realizado delas continua no gráfico e na tabela: ${histEsc(listadas.join(', '))}.</div>`;
   }
   html += `</div>`;
+  el.innerHTML = html;
+}
+
+// ---------- ALERTAS DE TENDÊNCIA ----------
+// Só olha ciclo FECHADO: o ciclo em curso tem acumulado parcial e acusaria "queda"
+// em todo mundo, todo dia. Regras deliberadamente conservadoras — alerta que dispara
+// à toa vira ruído e a gestora para de ler.
+function histCalcAlertas(ciclos) {
+  const fech = ciclos.filter(s => s.fechado);
+  const out = [];
+  if (fech.length < 3) return out;
+
+  const pdvs = new Set();
+  fech.forEach(s => Object.keys(s.lojas || {}).forEach(p => pdvs.add(p)));
+
+  for (const pdv of pdvs) {
+    // Receita POR DIA, não bruta: os ciclos têm 14, 21, 24 e 28 dias. Comparando o
+    // total, um ciclo de 14 dias depois de um de 28 sempre pareceria queda — o
+    // alerta dispararia sozinho na virada de todo ciclo curto.
+    const serie = fech
+      .map(s => ({ ciclo: s.ciclo, bruto: s.lojas?.[pdv]?.receita, dias: s.dias }))
+      .filter(p => p.bruto != null && p.dias)
+      .map(p => ({ ...p, v: p.bruto / p.dias }));
+    if (serie.length < 3) continue;
+    const nome = STORE_NAMES[pdv] || `PDV ${pdv}`;
+    const porDia = (x) => `${fmtBRL(x.v)}/dia`;
+
+    // quedas consecutivas até o último ciclo fechado
+    let quedas = 0;
+    for (let i = serie.length - 1; i > 0; i--) {
+      if (serie[i].v < serie[i - 1].v) quedas++; else break;
+    }
+    if (quedas >= 3) {
+      const de = serie[serie.length - 1 - quedas], ate = serie[serie.length - 1];
+      out.push({ nivel: 'grave', ico: '📉',
+        txt: `<b>${histEsc(nome)}</b> caiu em receita ${quedas} ciclos seguidos — de ${porDia(de)} (C${de.ciclo}) para ${porDia(ate)} (C${ate.ciclo}). <span style="color:var(--ink-dim)">Comparação por dia de ciclo, já que as durações variam.</span>` });
+    }
+    let altas = 0;
+    for (let i = serie.length - 1; i > 0; i--) {
+      if (serie[i].v > serie[i - 1].v) altas++; else break;
+    }
+    if (altas >= 3) {
+      const ate = serie[serie.length - 1];
+      out.push({ nivel: 'bom', ico: '📈',
+        txt: `<b>${histEsc(nome)}</b> cresceu ${altas} ciclos seguidos, chegando a ${porDia(ate)} no C${ate.ciclo} (${fmtBRL(ate.bruto)} no ciclo).` });
+    }
+    // último ciclo muito abaixo da própria média recente
+    if (serie.length >= 4) {
+      const base = serie.slice(-4, -1);
+      const media = base.reduce((a, p) => a + p.v, 0) / base.length;
+      const ult = serie[serie.length - 1];
+      if (media > 0 && ult.v < media * 0.8) {
+        out.push({ nivel: 'atencao', ico: '⚠️',
+          txt: `<b>${histEsc(nome)}</b> fechou o C${ult.ciclo} em ${porDia(ult)}, ${Math.round((1 - ult.v / media) * 100)}% abaixo da própria média por dia dos 3 ciclos anteriores (${fmtBRL(media)}/dia).` });
+      }
+    }
+  }
+
+  // regressão de segmento IAF entre os dois últimos ciclos fechados COM segmento
+  const comIaf = fech.filter(s => Object.values(s.consultoras || {}).some(c => c.iafTier));
+  if (comIaf.length >= 2) {
+    const ORD = { Bronze: 1, Prata: 2, Ouro: 3, Diamante: 4 };
+    const b = comIaf[comIaf.length - 1], a = comIaf[comIaf.length - 2];
+    for (const [can, cb] of Object.entries(b.consultoras || {})) {
+      const ca = a.consultoras?.[can];
+      if (!ca?.iafTier || !cb.iafTier) continue;
+      const da = ORD[ca.iafTier], db = ORD[cb.iafTier];
+      if (da && db && db < da) {
+        out.push({ nivel: 'atencao', ico: '🎖️',
+          txt: `<b>${histEsc(cb.nome || can)}</b> caiu de ${ca.iafTier} (C${a.ciclo}) para ${cb.iafTier} (C${b.ciclo}) no segmento IAF.` });
+      }
+    }
+  }
+  const PESO = { grave: 0, atencao: 1, bom: 2 };
+  return out.sort((x, y) => PESO[x.nivel] - PESO[y.nivel]).slice(0, 12);
+}
+
+function histRenderAlertas(el, ciclos) {
+  const alertas = histCalcAlertas(ciclos);
+  if (!alertas.length) {
+    const fech = ciclos.filter(s => s.fechado).length;
+    el.innerHTML = fech < 3
+      ? `<div class="hist-alertas-vazio">Alertas de tendência aparecem a partir de 3 ciclos fechados (hoje: ${fech}).</div>`
+      : `<div class="hist-alertas-vazio">Nenhuma tendência fora do normal nos ciclos fechados.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="hist-alertas">` + alertas.map(a =>
+    `<div class="hist-alerta ${a.nivel}"><span class="hist-alerta-ico">${a.ico}</span><span>${a.txt}</span></div>`
+  ).join('') + `</div>`;
+}
+
+// ---------- RITMO DENTRO DO CICLO ----------
+// Sobrepõe os ciclos pelo DIA DO CICLO (1, 2, 3...), não pela data: é isso que
+// permite comparar "dia 10 de 21" entre ciclos de tamanhos diferentes.
+const histDiaDoCiclo = (inicio, dia) => {
+  if (!inicio || !dia) return null;
+  const a = new Date(inicio + 'T00:00:00'), b = new Date(dia + 'T00:00:00');
+  if (isNaN(a) || isNaN(b)) return null;
+  return Math.round((b - a) / 86400000) + 1;
+};
+
+function histRenderRitmo(ciclos) {
+  const chartEl = $('histRitmoChart'), avisoEl = $('histRitmoAviso');
+  if (!chartEl) return;
+  const serie = serieDiariaCache || {};
+  const ind = $('histRitmoInd')?.value || 'receita';
+  const pdv = selectedPdv;
+  const nomeLoja = STORE_NAMES[pdv] || `PDV ${pdv}`;
+
+  const META_DE = { receita: 'receita', skin: 'skin' };
+  const LABEL = { receita: 'Receita', skin: 'Skin', servicos: 'Serviços', boletos: 'Boletos' };
+
+  // Serviços e Boletos não têm meta por loja: "% da meta" devolveria gráfico vazio.
+  // Mesma regra da aba Evolução — a opção impossível fica desabilitada, não escondida.
+  const modoSel = $('histRitmoModo');
+  let modo = modoSel?.value || 'pctMeta';
+  const temMetaInd = !!META_DE[ind];
+  if (modoSel) {
+    for (const opt of modoSel.options) {
+      if (opt.value === 'pctMeta') opt.disabled = !temMetaInd;
+    }
+    if (modo === 'pctMeta' && !temMetaInd) { modo = 'valor'; modoSel.value = 'valor'; }
+  }
+
+  const comDados = [];
+  for (const snap of ciclos) {
+    const dias = serie[String(snap.ciclo)];
+    if (!dias || !Object.keys(dias).length) continue;
+    const pontos = [];
+    for (const [dia, lojas] of Object.entries(dias)) {
+      const v = lojas?.[pdv]?.[ind];
+      if (v == null) continue;
+      const d = histDiaDoCiclo(snap.inicio, dia);
+      // Teto de 60 dias: o ciclo mais longo tem 28. Um ponto com data fora da
+      // janela (gravado direto na API, fora do caminho do painel) geraria um
+      // eixo de milhares de colunas e travaria o navegador.
+      if (!d || d < 1 || d > 60) continue;
+      let val = v;
+      if (modo === 'pctMeta') {
+        const mk = META_DE[ind];
+        const meta = mk ? snap.lojas?.[pdv]?.metas?.[mk] : null;
+        if (!meta) continue;
+        val = (v / meta) * 100;
+      }
+      pontos.push({ i: d - 1, v: val });
+    }
+    if (pontos.length) comDados.push({ snap, pontos: pontos.sort((a, b) => a.i - b.i) });
+  }
+
+  if (!comDados.length) {
+    chartEl.innerHTML = `<div class="hist-empty">Ainda não há série diária gravada.<br>
+      Cada carga de planilhas do ciclo em curso grava um ponto — a curva aparece a partir do segundo dia,
+      e a comparação entre ciclos, a partir do segundo ciclo acompanhado.</div>`;
+    if (avisoEl) avisoEl.innerHTML = `· Esta série <b>não é reconstruível do passado</b>: os ciclos 1 a 11 foram importados de planilhas que só trazem o total do ciclo, sem o caminho até ele.`;
+    return;
+  }
+
+  const maxDia = Math.max(...comDados.flatMap(c => c.pontos.map(p => p.i))) + 1;
+  const labels = Array.from({ length: maxDia }, (_, i) => ({ topo: `D${i + 1}` }));
+  const ultimo = comDados[comDados.length - 1];
+  const series = comDados.map(c => ({
+    nome: `C${c.snap.ciclo}`,
+    foco: c.snap.ciclo === ultimo.snap.ciclo,
+    tracejado: !c.snap.fechado,
+    pontos: c.pontos,
+  }));
+
+  chartEl.innerHTML = histChartXY(labels, series, {
+    tipo: modo === 'pctMeta' ? 'pct' : (ind === 'servicos' || ind === 'boletos' ? 'int' : 'moeda'),
+    refLinha: modo === 'pctMeta' ? 100 : null,
+    padR: 70, stepMin: 30,
+    aria: `Ritmo de ${LABEL[ind]} por dia do ciclo`,
+  });
+
+  const avisos = [`Loja: <b>${histEsc(nomeLoja)}</b>. Cada linha é um ciclo; o eixo é o dia do ciclo, então ciclos de 14 e 21 dias ficam comparáveis no começo.`];
+  if (!temMetaInd) {
+    avisos.push(`"${LABEL[ind]}" não tem meta por loja, então "% da meta" fica indisponível para ele.`);
+  }
+  const emCurso = comDados.filter(c => !c.snap.fechado).map(c => c.snap.ciclo);
+  if (emCurso.length) avisos.push(`Ciclo ${emCurso.join(', ')} em curso — linha tracejada, ainda subindo.`);
+  const poucos = comDados.filter(c => c.pontos.length < 3).map(c => c.snap.ciclo);
+  if (poucos.length) avisos.push(`Ciclo(s) ${poucos.join(', ')} com poucos pontos: a série só começou a ser gravada em 08/08/2026.`);
+  if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
+}
+
+// Gráfico de linha genérico: o eixo X são rótulos quaisquer (dia do ciclo, ciclo,
+// data...), não só ciclos. histLineChart continua servindo a aba Evolução, que tem
+// regras próprias (tracejado do ciclo em curso, rótulo por loja); este atende as
+// views novas — ritmo, ficha da consultora — sem duplicar eixo/grid/rótulo.
+function histChartXY(labels, series, opts) {
+  const o = opts || {};
+  if (!series.length || !labels.length) {
+    return `<div class="hist-empty">${histEsc(o.vazio || 'Sem dados para exibir.')}</div>`;
+  }
+  const padL = 72, padR = o.padR != null ? o.padR : 120, padT = 18, padB = 44;
+  const step = Math.max(o.stepMin || 36, Math.min(110, 700 / Math.max(1, labels.length - 1)));
+  const plotW = Math.max(step, (labels.length - 1) * step);
+  const w = padL + plotW + padR, h = o.altura || 300, plotH = h - padT - padB;
+
+  let max = 0, min = 0;
+  series.forEach(s => s.pontos.forEach(p => {
+    if (p.v == null || !isFinite(p.v)) return;
+    if (p.v > max) max = p.v;
+    if (p.v < min) min = p.v;
+  }));
+  if (o.refLinha && o.refLinha > max) max = o.refLinha;
+  if (max <= 0) max = 1;
+  max *= 1.1;
+  if (min > 0) min = 0;
+
+  const x = (i) => padL + (labels.length === 1 ? plotW / 2 : i * step);
+  const y = (v) => padT + plotH - ((v - min) / (max - min)) * plotH;
+
+  // .hist-viz carrega as variáveis de cor da visualização (--hist-serie e cia).
+  // Sem ela as linhas e barras saem pretas — o container destas views não tem a classe.
+  let svg = `<div class="hist-viz"><div class="hist-chart-wrap"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${histEsc(o.aria || 'Gráfico')}">`;
+  for (let t = 0; t <= 4; t++) {
+    const v = min + ((max - min) / 4) * t, yy = y(v);
+    svg += `<line x1="${padL}" y1="${yy}" x2="${padL + plotW}" y2="${yy}" stroke="var(--hist-grid)" stroke-width="1"/>`;
+    svg += `<text x="${padL - 10}" y="${yy + 4}" text-anchor="end" font-size="10" fill="var(--ink-dim)" font-family="'JetBrains Mono',monospace">${histFmt(v, o.tipo)}</text>`;
+  }
+  if (o.refLinha) {
+    const yy = y(o.refLinha);
+    svg += `<line x1="${padL}" y1="${yy}" x2="${padL + plotW}" y2="${yy}" stroke="var(--ink-mute)" stroke-width="1" stroke-dasharray="4 4"/>`;
+    svg += `<text x="${padL + plotW + 6}" y="${yy - 5}" font-size="9" fill="var(--ink-mute)">${histEsc(o.refLabel || 'meta')}</text>`;
+  }
+  // rótulos do eixo X — com muitos pontos, mostra 1 a cada N para não virar borrão
+  const passo = Math.ceil(labels.length / 26);
+  labels.forEach((l, i) => {
+    if (i % passo !== 0 && i !== labels.length - 1) return;
+    svg += `<text x="${x(i)}" y="${h - 24}" text-anchor="middle" font-size="10" fill="var(--ink-mute)" font-family="'JetBrains Mono',monospace">${histEsc(l.topo || '')}</text>`;
+    if (l.base) svg += `<text x="${x(i)}" y="${h - 11}" text-anchor="middle" font-size="8" fill="var(--ink-dim)">${histEsc(l.base)}</text>`;
+  });
+
+  const ordenadas = [...series.filter(s => !s.foco), ...series.filter(s => s.foco)];
+  const rotulos = [];
+  for (const s of ordenadas) {
+    const pts = s.pontos.filter(p => p.v != null && isFinite(p.v));
+    if (!pts.length) continue;
+    const cor = s.cor || (s.foco ? 'var(--hist-serie)' : 'var(--hist-contexto)');
+    const lw = s.foco ? 2.5 : 1.5, op = s.foco ? 1 : 0.45;
+    svg += `<polyline points="${pts.map(p => `${x(p.i)},${y(p.v)}`).join(' ')}" fill="none" stroke="${cor}" stroke-width="${lw}" stroke-linejoin="round" stroke-linecap="round" opacity="${op}"${s.tracejado ? ' stroke-dasharray="5 4"' : ''}/>`;
+    // idem histLineChart: um ponto sozinho não vira linha, precisa do círculo
+    if ((s.foco || pts.length === 1) && pts.length <= 30) {
+      pts.forEach(p => { svg += `<circle cx="${x(p.i)}" cy="${y(p.v)}" r="3.5" fill="${cor}" opacity="${s.foco ? 1 : 0.55}"/>`; });
+    }
+    if (s.nome) {
+      const ult = pts[pts.length - 1];
+      rotulos.push({ nome: s.nome, foco: s.foco, cor, x: x(ult.i) + 10, yIdeal: y(ult.v) + 3.5 });
+    }
+  }
+  const GAP = 13, limite = padT + plotH + 6;
+  rotulos.sort((a, b) => a.yIdeal - b.yIdeal);
+  let anterior = -Infinity;
+  for (const r of rotulos) { r.y = Math.max(r.yIdeal, anterior + GAP); anterior = r.y; }
+  if (rotulos.length && rotulos[rotulos.length - 1].y > limite) {
+    let prox = limite;
+    for (let i = rotulos.length - 1; i >= 0; i--) { rotulos[i].y = Math.min(rotulos[i].y, prox); prox = rotulos[i].y - GAP; }
+  }
+  for (const r of rotulos) {
+    if (Math.abs(r.y - r.yIdeal) > 2) {
+      svg += `<line x1="${r.x - 7}" y1="${r.yIdeal - 3.5}" x2="${r.x - 2}" y2="${r.y - 3.5}" stroke="${r.cor}" stroke-width="1" opacity="0.3"/>`;
+    }
+    svg += `<text x="${r.x}" y="${r.y}" font-size="10" fill="${r.cor}" opacity="${r.foco ? 1 : 0.75}" font-weight="${r.foco ? 600 : 400}">${histEsc(r.nome)}</text>`;
+  }
+  svg += `</svg></div></div>`;
+  return svg;
+}
+
+// Barras verticais — serviços por dia / por dia da semana.
+function histChartBarras(itens, opts) {
+  const o = opts || {};
+  if (!itens.length) return `<div class="hist-empty">${histEsc(o.vazio || 'Sem dados.')}</div>`;
+  const padL = 60, padR = 16, padT = 16, padB = 46;
+  const bw = Math.max(o.larguraMin || 14, Math.min(46, 900 / itens.length));
+  const plotW = itens.length * bw;
+  const w = padL + plotW + padR, h = o.altura || 260, plotH = h - padT - padB;
+  let max = 0;
+  itens.forEach(it => { if (it.v > max) max = it.v; });
+  if (max <= 0) max = 1;
+  max *= 1.1;
+  const y = (v) => padT + plotH - (v / max) * plotH;
+
+  let svg = `<div class="hist-viz"><div class="hist-chart-wrap"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${histEsc(o.aria || 'Barras')}">`;
+  for (let t = 0; t <= 4; t++) {
+    const v = (max / 4) * t, yy = y(v);
+    svg += `<line x1="${padL}" y1="${yy}" x2="${padL + plotW}" y2="${yy}" stroke="var(--hist-grid)" stroke-width="1"/>`;
+    svg += `<text x="${padL - 10}" y="${yy + 4}" text-anchor="end" font-size="10" fill="var(--ink-dim)" font-family="'JetBrains Mono',monospace">${histFmt(v, 'int')}</text>`;
+  }
+  const passo = Math.ceil(itens.length / 30);
+  itens.forEach((it, i) => {
+    const bx = padL + i * bw, alt = Math.max(0, padT + plotH - y(it.v));
+    svg += `<rect x="${bx + 1}" y="${y(it.v)}" width="${Math.max(1, bw - 2)}" height="${alt}" fill="var(--hist-serie)" opacity="${it.destaque ? 1 : 0.7}" rx="1.5"><title>${histEsc(it.titulo || it.rotulo)}: ${it.v}</title></rect>`;
+    if (i % passo === 0 || itens.length <= 30) {
+      svg += `<text x="${bx + bw / 2}" y="${h - 26}" text-anchor="middle" font-size="9" fill="var(--ink-mute)" font-family="'JetBrains Mono',monospace">${histEsc(it.rotulo)}</text>`;
+    }
+    if (it.sub) svg += `<text x="${bx + bw / 2}" y="${h - 13}" text-anchor="middle" font-size="8" fill="var(--ink-dim)">${histEsc(it.sub)}</text>`;
+  });
+  svg += `</svg></div></div>`;
+  return svg;
+}
+
+// ---------- SERVIÇOS POR DIA ----------
+const HIST_DOW = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+function histPreencherLojasServicos(ciclos) {
+  const sel = $('histSvcLoja');
+  if (!sel) return;
+  const pdvs = new Set();
+  ciclos.forEach(s => Object.values(s.servicosPorDia || {}).forEach(l => Object.keys(l).forEach(p => pdvs.add(p))));
+  const anterior = sel.value;
+  sel.innerHTML = `<option value="">Todas as lojas</option>` + [...pdvs].sort()
+    .map(p => `<option value="${p}">${histEsc(String(STORE_NAMES[p] || p).replace(/^Loja\s+/i, ''))}</option>`).join('');
+  if (anterior && pdvs.has(anterior)) sel.value = anterior;
+}
+
+function histRenderServicos(ciclos) {
+  const chartEl = $('histSvcChart'), avisoEl = $('histSvcAviso');
+  if (!chartEl) return;
+  const agrup = $('histSvcAgrup')?.value || 'dia';
+  const pdvFiltro = $('histSvcLoja')?.value || '';
+
+  // junta o dia-a-dia de todos os ciclos que têm a série
+  const porDia = new Map();          // "YYYY-MM-DD" -> qtd
+  const ciclosCom = [], ciclosSem = [];
+  for (const s of ciclos) {
+    if (!s.servicosPorDia || !Object.keys(s.servicosPorDia).length) { ciclosSem.push(s.ciclo); continue; }
+    ciclosCom.push(s.ciclo);
+    for (const [dia, lojas] of Object.entries(s.servicosPorDia)) {
+      let q = 0;
+      for (const [pdv, n] of Object.entries(lojas)) {
+        if (pdvFiltro && pdv !== pdvFiltro) continue;
+        q += nlz(n);
+      }
+      if (q) porDia.set(dia, (porDia.get(dia) || 0) + q);
+    }
+  }
+
+  if (!porDia.size) {
+    chartEl.innerHTML = `<div class="hist-empty">Nenhum ciclo do histórico tem serviços com data.<br>
+      O relatório novo ("Serviços em loja", desde 31/07/2026) vem somado por ciclo, sem a coluna DATA REALIZACAO.</div>`;
+    if (avisoEl) avisoEl.innerHTML = '';
+    return;
+  }
+
+  let itens;
+  if (agrup === 'semana') {
+    const acc = new Array(7).fill(0), dias = new Array(7).fill(0);
+    for (const [dia, q] of porDia) {
+      const d = new Date(dia + 'T00:00:00');
+      if (isNaN(d)) continue;
+      acc[d.getDay()] += q; dias[d.getDay()]++;
+    }
+    // média por dia da semana: domingo aparece menos vezes, somar puniria injustamente
+    itens = HIST_DOW.map((nome, i) => ({
+      rotulo: nome.slice(0, 3),
+      v: dias[i] ? Math.round((acc[i] / dias[i]) * 10) / 10 : 0,
+      titulo: `${nome} — média por dia (${acc[i]} serviços em ${dias[i]} dia(s))`,
+    }));
+  } else {
+    itens = [...porDia.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([dia, q]) => {
+      const d = new Date(dia + 'T00:00:00');
+      return {
+        rotulo: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`,
+        v: q, titulo: `${HIST_DOW[d.getDay()]}, ${dia.split('-').reverse().join('/')}`,
+      };
+    });
+  }
+
+  chartEl.innerHTML = histChartBarras(itens, {
+    aria: agrup === 'semana' ? 'Média de serviços por dia da semana' : 'Serviços por dia',
+    altura: 280,
+  });
+
+  const total = [...porDia.values()].reduce((a, b) => a + b, 0);
+  const datas = [...porDia.keys()].sort();
+  const avisos = [
+    `${total} serviços em ${porDia.size} dias com movimento, de ${datas[0].split('-').reverse().join('/')} a ${datas[datas.length - 1].split('-').reverse().join('/')}${pdvFiltro ? ` · ${histEsc(STORE_NAMES[pdvFiltro] || pdvFiltro)}` : ' · todas as lojas'}.`,
+    `Ciclo(s) com data: ${ciclosCom.join(', ')}.`,
+  ];
+  if (ciclosSem.length) {
+    avisos.push(`Ciclo(s) ${ciclosSem.join(', ')} sem série diária: exportados no relatório novo, que já vem somado por ciclo e sem data. Só o formato antigo trazia DATA REALIZACAO.`);
+  }
+  if (agrup === 'semana') avisos.push(`Média por dia da semana (não soma) — domingos aparecem menos vezes no período e somar puniria o dia.`);
+  if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
+}
+
+// ---------- FICHA DA CONSULTORA ----------
+const HIST_CONS_COLS = [
+  { k: 'receita', label: 'Receita', tipo: 'moeda', meta: 'receita' },
+  { k: 'skin', label: 'Skin', tipo: 'moeda', meta: 'skin' },
+  { k: 'boletoMedio', label: 'Boleto Médio', tipo: 'moeda', meta: 'boletoMedio' },
+  { k: 'itensBoleto', label: 'Itens/Boleto', tipo: 'dec' },
+  { k: 'servicos', label: 'Serviços', tipo: 'int' },
+];
+
+function histPreencherConsultoras(ciclos) {
+  const sel = $('histConsultora');
+  if (!sel) return;
+  const nomes = new Map();
+  ciclos.forEach(s => Object.entries(s.consultoras || {}).forEach(([can, c]) => {
+    if (!nomes.has(can)) nomes.set(can, c.nome || can);
+  }));
+  const anterior = sel.value;
+  const ordenadas = [...nomes.entries()].sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
+  sel.innerHTML = ordenadas.map(([can, nome]) => `<option value="${histEsc(can)}">${histEsc(nome)}</option>`).join('');
+  if (anterior && nomes.has(anterior)) { sel.value = anterior; return; }
+
+  // Padrão: a maior receita da loja selecionada no ciclo mais recente. Em ordem
+  // alfabética a primeira costuma ser uma ex-consultora de um ciclo só, e a tela
+  // abre parecendo vazia.
+  const ultimo = ciclos[ciclos.length - 1];
+  const daLoja = Object.entries(ultimo?.consultoras || {})
+    .filter(([, c]) => c.pdv === selectedPdv)
+    .sort((a, b) => nlz(b[1].receita) - nlz(a[1].receita));
+  const escolha = daLoja[0]?.[0]
+    || Object.entries(ultimo?.consultoras || {}).sort((a, b) => nlz(b[1].receita) - nlz(a[1].receita))[0]?.[0];
+  if (escolha && nomes.has(escolha)) sel.value = escolha;
+}
+
+function histRenderConsultora(ciclos) {
+  const resumoEl = $('histConsResumo'), chartEl = $('histConsChart');
+  const tabEl = $('histConsTabela'), avisoEl = $('histConsAviso');
+  if (!chartEl) return;
+  const can = $('histConsultora')?.value;
+  if (!can) { chartEl.innerHTML = `<div class="hist-empty">Nenhuma consultora no histórico.</div>`; return; }
+
+  const linha = ciclos.map(s => ({ snap: s, c: s.consultoras?.[can] || null }));
+  const presentes = linha.filter(l => l.c);
+  if (!presentes.length) { chartEl.innerHTML = `<div class="hist-empty">Sem dados desta consultora.</div>`; return; }
+  const nome = presentes[presentes.length - 1].c.nomeCompleto || presentes[presentes.length - 1].c.nome || can;
+
+  // KPIs: último ciclo com dado + variação contra o ciclo anterior em que apareceu
+  const ult = presentes[presentes.length - 1], pen = presentes.length > 1 ? presentes[presentes.length - 2] : null;
+  const delta = (k) => {
+    if (!pen) return '';
+    const a = nlz(pen.c[k]), b = nlz(ult.c[k]);
+    if (!a) return '';
+    const p = Math.round(((b - a) / a) * 100);
+    if (!isFinite(p) || p === 0) return `<div class="hist-kpi-sub">igual ao C${pen.snap.ciclo}</div>`;
+    return `<div class="hist-kpi-sub ${p > 0 ? 'hist-delta-up' : 'hist-delta-down'}">${p > 0 ? '+' : ''}${p}% vs C${pen.snap.ciclo}</div>`;
+  };
+  const melhor = presentes.reduce((m, l) => (nlz(l.c.receita) > nlz(m.c.receita) ? l : m), presentes[0]);
+  const segmentos = presentes.filter(l => l.c.iafTier);
+  const segAtual = segmentos.length ? segmentos[segmentos.length - 1] : null;
+
+  if (resumoEl) {
+    resumoEl.innerHTML = `<div class="hist-kpis">
+      <div class="hist-kpi"><div class="hist-kpi-label">Último ciclo (C${ult.snap.ciclo})</div>
+        <div class="hist-kpi-valor">${fmtBRL(nlz(ult.c.receita))}</div>${delta('receita')}</div>
+      <div class="hist-kpi"><div class="hist-kpi-label">Skin</div>
+        <div class="hist-kpi-valor">${fmtBRL(nlz(ult.c.skin))}</div>${delta('skin')}</div>
+      <div class="hist-kpi"><div class="hist-kpi-label">Melhor ciclo</div>
+        <div class="hist-kpi-valor">${fmtBRL(nlz(melhor.c.receita))}</div>
+        <div class="hist-kpi-sub">C${melhor.snap.ciclo}</div></div>
+      <div class="hist-kpi"><div class="hist-kpi-label">Segmento IAF</div>
+        <div class="hist-kpi-valor">${segAtual ? histEsc(segAtual.c.iafTier) : '—'}</div>
+        <div class="hist-kpi-sub">${segAtual ? `apurado no C${segAtual.snap.ciclo}` : 'nunca apurado'}</div></div>
+      <div class="hist-kpi"><div class="hist-kpi-label">Ciclos no histórico</div>
+        <div class="hist-kpi-valor">${presentes.length}</div>
+        <div class="hist-kpi-sub">de ${ciclos.length}</div></div>
+    </div>`;
+  }
+
+  const labels = ciclos.map(s => ({ topo: `C${s.ciclo}`, base: s.dias ? `${s.dias}d` : '' }));
+  chartEl.innerHTML = histChartXY(labels, [
+    { nome: 'Receita', foco: true, pontos: linha.map((l, i) => ({ i, v: l.c ? nlz(l.c.receita) : null })) },
+    { nome: 'Skin', foco: false, pontos: linha.map((l, i) => ({ i, v: l.c ? nlz(l.c.skin) : null })) },
+  ], { tipo: 'moeda', aria: `Receita e skin de ${nome} por ciclo`, padR: 80 });
+
+  if (tabEl) {
+    let html = `<thead><tr><th>Ciclo</th><th>Loja</th>${HIST_CONS_COLS.map(c => `<th style="text-align:right">${c.label}</th>`).join('')}<th style="text-align:right">IAF</th></tr></thead><tbody>`;
+    for (const l of linha) {
+      if (!l.c) {
+        html += `<tr><td style="font-weight:600">C${l.snap.ciclo}</td><td colspan="${HIST_CONS_COLS.length + 2}" style="color:var(--ink-dim); font-size:11px">não estava na rede neste ciclo</td></tr>`;
+        continue;
+      }
+      const lojaNome = STORE_NAMES[l.c.pdv] || l.c.pdv || '—';
+      html += `<tr><td style="font-weight:600">C${l.snap.ciclo}</td><td style="font-size:11px; color:var(--ink-mute)">${histEsc(String(lojaNome).replace(/^Loja\s+/i, ''))}</td>`;
+      for (const col of HIST_CONS_COLS) {
+        const v = nlz(l.c[col.k]);
+        const meta = col.meta ? nlz(l.c.metas?.[col.meta]) : 0;
+        const pct = (v && meta) ? Math.round((v / meta) * 100) : null;
+        html += `<td style="text-align:right; font-family:'JetBrains Mono',monospace">${histFmt(v || null, col.tipo)}${pct != null ? `<div style="font-size:9px; color:var(--ink-dim)">${pct}% da meta</div>` : ''}</td>`;
+      }
+      html += `<td style="text-align:right; font-size:11px">${l.c.iafTier ? histEsc(l.c.iafTier) : (l.snap.fechado ? '—' : 'em curso')}</td></tr>`;
+    }
+    tabEl.innerHTML = html + `</tbody>`;
+  }
+
+  const avisos = [`<b>${histEsc(nome)}</b>${ult.c.pdvs && ult.c.pdvs.length > 1 ? ` — atuou em mais de uma loja no C${ult.snap.ciclo}` : ''}.`];
+  const semMeta = presentes.filter(l => !l.c.metas).map(l => l.snap.ciclo);
+  if (semMeta.length) avisos.push(`Sem meta cadastrada no(s) ciclo(s) ${semMeta.join(', ')} — ali não há % nem segmento.`);
+  if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
+}
+
+// ---------- FECHAMENTO DO CICLO ----------
+function histPreencherFechamento(ciclos) {
+  const sel = $('histFechCiclo');
+  if (!sel) return;
+  const anterior = sel.value;
+  const opts = [...ciclos].reverse();
+  sel.innerHTML = opts.map(s => `<option value="${s.ciclo}">C${s.ciclo} · ${histEsc(s.periodo)}${s.fechado ? '' : ' (em curso)'}</option>`).join('');
+  if (anterior && opts.some(s => String(s.ciclo) === anterior)) { sel.value = anterior; return; }
+  // A tela chama-se Fechamento: abre no último ciclo FECHADO. O ciclo em curso
+  // continua na lista, mas escolhido de propósito — abrir nele mostraria acumulado
+  // parcial com cara de resultado final.
+  const ultFechado = opts.find(s => s.fechado);
+  if (ultFechado) sel.value = String(ultFechado.ciclo);
+}
+
+function histRenderFechamento(ciclos) {
+  const el = $('histFechamento');
+  if (!el) return;
+  const alvo = parseInt($('histFechCiclo')?.value, 10);
+  const i = ciclos.findIndex(s => s.ciclo === alvo);
+  if (i < 0) { el.innerHTML = `<div class="hist-empty">Escolha um ciclo.</div>`; return; }
+  const s = ciclos[i], ant = i > 0 ? ciclos[i - 1] : null;
+
+  const varia = (atual, anterior) => {
+    if (anterior == null || !anterior || atual == null) return '';
+    const p = Math.round(((atual - anterior) / anterior) * 100);
+    if (!isFinite(p)) return '';
+    if (p === 0) return `<div style="font-size:9px; color:var(--ink-dim)">igual a C${ant.ciclo}</div>`;
+    return `<div style="font-size:9px" class="${p > 0 ? 'hist-delta-up' : 'hist-delta-down'}">${p > 0 ? '+' : ''}${p}% vs C${ant.ciclo}</div>`;
+  };
+
+  let html = '';
+  if (!s.fechado) {
+    html += `<div class="hist-alerta atencao" style="margin-bottom:16px"><span class="hist-alerta-ico">⏳</span>
+      <span>O ciclo ${s.ciclo} <b>ainda está em curso</b> (${histEsc(s.periodo)}). Os números abaixo são o acumulado até a última carga de planilhas, não o resultado final.</span></div>`;
+  }
+
+  // totais da rede
+  const soma = (snap, k) => Object.values(snap.lojas || {}).reduce((a, l) => a + nlz(l[k]), 0);
+  const somaMeta = (snap, k) => Object.values(snap.lojas || {}).reduce((a, l) => a + nlz(l.metas?.[k]), 0);
+  const recR = soma(s, 'receita'), recM = somaMeta(s, 'receita');
+  const skinR = soma(s, 'skin'), skinM = somaMeta(s, 'skin');
+  html += `<div class="hist-kpis">
+    <div class="hist-kpi"><div class="hist-kpi-label">Receita da rede</div>
+      <div class="hist-kpi-valor">${fmtBRL(recR)}</div>
+      ${recM ? `<div class="hist-kpi-sub">${Math.round(recR / recM * 100)}% da meta (${fmtBRL(recM)})</div>` : ''}
+      ${ant ? varia(recR, soma(ant, 'receita')) : ''}</div>
+    <div class="hist-kpi"><div class="hist-kpi-label">Skin da rede</div>
+      <div class="hist-kpi-valor">${fmtBRL(skinR)}</div>
+      ${skinM ? `<div class="hist-kpi-sub">${Math.round(skinR / skinM * 100)}% da meta</div>` : ''}
+      ${ant ? varia(skinR, soma(ant, 'skin')) : ''}</div>
+    <div class="hist-kpi"><div class="hist-kpi-label">Serviços</div>
+      <div class="hist-kpi-valor">${histFmt(soma(s, 'servicos'), 'int')}</div>
+      ${ant ? varia(soma(s, 'servicos'), soma(ant, 'servicos')) : ''}</div>
+    <div class="hist-kpi"><div class="hist-kpi-label">Duração</div>
+      <div class="hist-kpi-valor">${s.dias || '—'}d</div>
+      <div class="hist-kpi-sub">${histEsc(s.periodo)}</div></div>
+  </div>`;
+
+  // por loja
+  html += `<div class="hist-fech-titulo">Por loja</div><div class="hub-table-wrap"><table class="hub-table">
+    <thead><tr><th>Loja</th><th style="text-align:right">Receita</th><th style="text-align:right">Meta</th>
+    <th style="text-align:right">Atingimento</th><th style="text-align:right">Skin</th><th style="text-align:right">Serviços</th></tr></thead><tbody>`;
+  const pdvsOrd = Object.keys(s.lojas || {}).sort((a, b) => nlz(s.lojas[b].receita) - nlz(s.lojas[a].receita));
+  for (const pdv of pdvsOrd) {
+    const l = s.lojas[pdv], meta = nlz(l.metas?.receita);
+    const pct = meta ? (nlz(l.receita) / meta) * 100 : null;
+    const cor = pct == null ? 'var(--ink-dim)' : pct >= 100 ? 'var(--green)' : pct >= 80 ? 'var(--yellow)' : 'var(--red)';
+    html += `<tr><td>${histEsc(String(STORE_NAMES[pdv] || pdv).replace(/^Loja\s+/i, ''))}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${fmtBRL(nlz(l.receita))}${ant ? varia(nlz(l.receita), nlz(ant.lojas?.[pdv]?.receita)) : ''}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace; color:var(--ink-mute)">${meta ? fmtBRL(meta) : '—'}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace; color:${cor}">${pct != null ? Math.round(pct) + '%' : '—'}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${fmtBRL(nlz(l.skin))}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${histFmt(nlz(l.servicos), 'int')}</td></tr>`;
+  }
+  html += `</tbody></table></div>`;
+
+  // consultoras com segmento
+  const cons = Object.entries(s.consultoras || {})
+    .filter(([, c]) => c.iafTier || c.iafPct != null)
+    .sort((a, b) => (b[1].iafPct ?? -1) - (a[1].iafPct ?? -1));
+  if (cons.length) {
+    const ORD = { Bronze: 1, Prata: 2, Ouro: 3, Diamante: 4 };
+    html += `<div class="hist-fech-titulo">Segmento IAF por consultora</div><div class="hub-table-wrap"><table class="hub-table">
+      <thead><tr><th>Consultora</th><th>Loja</th><th style="text-align:right">Receita</th>
+      <th style="text-align:right">% IAF</th><th>Segmento</th><th>vs ciclo anterior</th></tr></thead><tbody>`;
+    for (const [can, c] of cons) {
+      const ca = ant?.consultoras?.[can];
+      let mov = '<span style="color:var(--ink-dim)">—</span>';
+      // Só compara segmento entre ciclos FECHADOS. Num ciclo em curso o IAF é
+      // parcial, e comparar parcial com fechado acusaria "caiu de Diamante" em
+      // metade da rede todo dia até o ciclo terminar.
+      if (!s.fechado) {
+        mov = '<span style="color:var(--ink-dim)">ciclo em curso</span>';
+      } else if (ca?.iafTier && c.iafTier && ant?.fechado) {
+        const d = (ORD[c.iafTier] || 0) - (ORD[ca.iafTier] || 0);
+        mov = d > 0 ? `<span class="hist-delta-up">▲ subiu de ${histEsc(ca.iafTier)}</span>`
+            : d < 0 ? `<span class="hist-delta-down">▼ caiu de ${histEsc(ca.iafTier)}</span>`
+            : `<span style="color:var(--ink-mute)">manteve</span>`;
+      } else if (!ca) {
+        mov = '<span style="color:var(--ink-dim)">1º ciclo</span>';
+      }
+      html += `<tr><td>${histEsc(c.nome || can)}</td>
+        <td style="font-size:11px; color:var(--ink-mute)">${histEsc(String(STORE_NAMES[c.pdv] || c.pdv || '—').replace(/^Loja\s+/i, ''))}</td>
+        <td style="text-align:right; font-family:'JetBrains Mono',monospace">${fmtBRL(nlz(c.receita))}</td>
+        <td style="text-align:right; font-family:'JetBrains Mono',monospace">${c.iafPct != null ? (c.iafPct * 100).toFixed(1).replace('.', ',') + '%' : '—'}</td>
+        <td>${!s.fechado ? '<span style="color:var(--ink-dim)">parcial</span>' : (c.iafTier ? histEsc(c.iafTier) : '—')}</td>
+        <td style="font-size:11px">${mov}</td></tr>`;
+    }
+    html += `</tbody></table></div>`;
+  } else if (s.semMetas) {
+    html += `<div class="hist-aviso">· Ciclo sem planilha de comissão: não há meta, então não há % de atingimento nem segmento IAF — só o realizado acima.</div>`;
+  }
   el.innerHTML = html;
 }
 
@@ -5161,9 +6048,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // Histórico: calendário dos ciclos (traduz período → número do ciclo) e os
   // controles da aba. O snapshot em si é agendado no fim de renderDashboard.
   loadCiclosCalendario();
-  ['histIndicador', 'histModo'].forEach(id => {
+  ['histIndicador', 'histModo', 'histRitmoInd', 'histRitmoModo',
+   'histSvcAgrup', 'histSvcLoja', 'histConsultora', 'histFechCiclo'].forEach(id => {
     const el = $(id);
     if (el) el.addEventListener('change', () => { try { renderHistoricoTab(); } catch (e) {} });
+  });
+
+  // Sub-navegação da aba Histórico. As views ficam todas montadas no DOM e só
+  // alternam display: renderHistoricoTab() já preenche todas de uma vez, então
+  // trocar de aba não precisa recalcular nada.
+  document.querySelectorAll('.hist-subtab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const alvo = btn.dataset.hview;
+      document.querySelectorAll('.hist-subtab').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('[data-hview-content]').forEach(v => {
+        v.style.display = v.dataset.hviewContent === alvo ? '' : 'none';
+      });
+    });
   });
 
   // Slack DM per-seller buttons
