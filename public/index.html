@@ -1004,6 +1004,20 @@
   .hist-delta-down { color: var(--red); }
   .hist-fech-titulo { font-size: 13px; color: var(--ink); margin: 18px 0 8px; font-weight: 600; }
 
+  /* faixas de consistência: do pior ao melhor ciclo, com a média marcada */
+  .hist-faixa-row { display: grid; grid-template-columns: 170px 1fr 52px; gap: 12px; align-items: center; margin-bottom: 7px; }
+  .hist-faixa-nome { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-faixa-trilho { position: relative; height: 18px; background: var(--bg-2); border-radius: 3px; }
+  .hist-faixa-barra { position: absolute; top: 4px; height: 10px; border-radius: 5px; opacity: 0.75; }
+  .hist-faixa-barra.estavel { background: var(--green); }
+  .hist-faixa-barra.medio { background: var(--yellow); }
+  .hist-faixa-barra.oscilante { background: var(--red); }
+  .hist-faixa-media { position: absolute; top: 1px; width: 2px; height: 16px; background: var(--ink); opacity: 0.85; }
+  .hist-faixa-cv { font-size: 11px; text-align: right; font-family: 'JetBrains Mono', monospace; }
+  .hist-faixa-cv.estavel { color: var(--green); }
+  .hist-faixa-cv.medio { color: var(--yellow); }
+  .hist-faixa-cv.oscilante { color: var(--red); }
+
   /* sparkline de contexto dentro do card do painel diário */
   .dash-spark {
     display: flex; align-items: center; gap: 8px; margin-top: 10px;
@@ -1652,6 +1666,7 @@
         <button class="hist-subtab" data-hview="servicos">Serviços por dia</button>
         <button class="hist-subtab" data-hview="consultora">Ficha da consultora</button>
         <button class="hist-subtab" data-hview="comparar">Comparar</button>
+        <button class="hist-subtab" data-hview="consistencia">Consistência</button>
         <button class="hist-subtab" data-hview="digital">Canal digital</button>
         <button class="hist-subtab" data-hview="fechamento">Fechamento</button>
       </div>
@@ -1688,6 +1703,32 @@
         </div>
       </div>
 
+      <!-- VIEW: CONSISTÊNCIA -->
+      <div class="hist-view" data-hview-content="consistencia" style="display:none">
+        <div class="dash-section">
+          <div class="dash-section-title">🎯 Consistência — quem entrega sempre e quem oscila</div>
+          <div class="hist-controls">
+            <label class="hist-ctl">
+              <span>Analisar</span>
+              <select id="histConsisTipo">
+                <option value="lojas">Lojas</option>
+                <option value="consultoras">Consultoras</option>
+              </select>
+            </label>
+            <label class="hist-ctl">
+              <span>Sobre</span>
+              <select id="histConsisBase">
+                <option value="pctMeta">% da meta atingida</option>
+                <option value="porDia">Receita por dia do ciclo</option>
+              </select>
+            </label>
+          </div>
+          <div id="histConsisChart"></div>
+          <div class="hub-table-wrap"><table class="hub-table" id="histConsisTabela"></table></div>
+          <div id="histConsisAviso" class="hist-aviso"></div>
+        </div>
+      </div>
+
       <!-- VIEW: CANAL DIGITAL -->
       <div class="hist-view" data-hview-content="digital" style="display:none">
         <div class="dash-section">
@@ -1710,6 +1751,10 @@
           <div id="histDigChart"></div>
           <div class="hub-table-wrap"><table class="hub-table" id="histDigTabela"></table></div>
           <div id="histDigAviso" class="hist-aviso"></div>
+        </div>
+        <div class="dash-section">
+          <div class="dash-section-title">Por loja — para onde o canal encaminha e onde converte</div>
+          <div id="histDigPorLoja"></div>
         </div>
       </div>
 
@@ -3338,6 +3383,50 @@ function servicosPorTipoDoCiclo(wbKey) {
   return Object.keys(out).length ? out : null;
 }
 
+// Serviços por CONSULTORA e tipo: { "<canonical>": { "<tipo>": qtd } }. Sai da aba
+// CONSULTOR do log v1, que traz nome + tipo + data por linha — a única granularidade
+// fina que existe por pessoa. Guarda por tipo (não por dia) para não inchar o JSON:
+// são 23 pessoas x 164 dias x 4 tipos, e o histórico é lido inteiro a cada abertura.
+// O log de serviços e o Resumo nem sempre grafam o nome igual: "Yasmin Abilia
+// Ferro Da Silva" no log é "Yasmin Ferro" no Resumo. Casa pelo conjunto de tokens
+// (um nome contido no outro) e só aceita quando a resposta é única — senão a chave
+// não bate com `consultoras` e o mix da pessoa some da ficha dela.
+function casaNoCatalogo(nomeNormalizado, nomesCatalogo) {
+  if (nomesCatalogo.includes(nomeNormalizado)) return nomeNormalizado;
+  const a = nomeNormalizado.split(/\s+/).filter(Boolean);
+  const hits = nomesCatalogo.filter(c => {
+    const b = c.split(/\s+/).filter(Boolean);
+    return b.every(t => a.includes(t)) || a.every(t => b.includes(t));
+  });
+  return hits.length === 1 ? hits[0] : nomeNormalizado;
+}
+
+function servicosPorConsultoraDoCiclo(wbKey) {
+  const rows = getSheet(wbKey || 'servicosRealizados', 'CONSULTOR');
+  if (!rows || !svcIsV1(rows)) return null;
+  const C = SVC_COLS.v1.cons;
+  const inCycle = makeServiceCycleFilter();
+  const nomesCatalogo = [];
+  for (const info of Object.values(storesCatalog || {})) {
+    for (const can of info.sellers.keys()) if (!nomesCatalogo.includes(can)) nomesCatalogo.push(can);
+  }
+  const out = {};
+  for (const r of rows.slice(1)) {
+    if (!r) continue;
+    const nome = String(r[C.name] || '').trim();
+    // linha sem atribuição vem com o próprio número do PDV no lugar do nome
+    if (!nome || /^\d{4,6}$/.test(nome)) continue;
+    if (!inCycle(r[C.data])) continue;
+    const q = nlz(r[C.qtd]);
+    if (!q) continue;
+    const can = casaNoCatalogo(normName(nome), nomesCatalogo);
+    const tipo = String(r[C.tipo] || '').trim() || 'Outros';
+    if (!out[can]) out[can] = {};
+    out[can][tipo] = (out[can][tipo] || 0) + q;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // Segmento IAF "fecha" no ultimo dia do ciclo (data de fim vem da planilha).
 // Durante o ciclo mostra o nivel travado (do ciclo anterior; Bronze se nao houver).
 // No dia do fim em diante, recalcula ao vivo com o acumulo total -> vira o novo travado.
@@ -4202,6 +4291,7 @@ function buildCicloSnapshot() {
     // null quando só existe o relatório v2, que não traz data
     servicosPorDia: servicosPorDiaDoCiclo('servicosLogV1') || servicosPorDiaDoCiclo(),
     servicosPorTipo: servicosPorTipoDoCiclo('servicosLogV1') || servicosPorTipoDoCiclo(),
+    servicosPorConsultora: servicosPorConsultoraDoCiclo('servicosLogV1') || servicosPorConsultoraDoCiclo(),
   };
 }
 
@@ -4509,7 +4599,12 @@ function agendarSnapshotAuto() {
       else if (p.motivo && p.motivo !== 'ciclo_fechado') logDebug(`Ritmo: ponto do dia não gravado (${p.motivo}).`);
       try { renderHistoricoTab(); } catch (e) {}
     } else if (r.motivo === 'periodo_nao_e_ciclo') {
-      logDebug('Histórico: período das planilhas não corresponde a um ciclo do calendário — snapshot não gravado.');
+      // Falha silenciosa era o risco: o painel segue funcionando e o histórico
+      // simplesmente para de crescer. Acontece de verdade na virada do ano, quando
+      // o período passa do último ciclo do calendário.
+      const per = extractPeriod('resumo') || '(sem período)';
+      logDebug(`⚠ Histórico NÃO gravado: o período "${per}" não corresponde a nenhum ciclo de config/ciclos-2026.json. Se o ano virou, o calendário precisa ser atualizado.`, 'err');
+      try { renderHistoricoTab(); } catch (e) {}
     } else {
       logDebug(`Histórico: ${r.message || r.motivo}`, 'err');
     }
@@ -4579,7 +4674,7 @@ function renderHistoricoTab() {
 
   // Views que existem fora da Evolução. Preenche os selects antes de renderizar,
   // senão a primeira abertura vem com o select vazio e a view em branco.
-  if ($('histAlertas')) histRenderAlertas($('histAlertas'), ciclos);
+  if ($('histAlertas')) histRenderAlertas($('histAlertas'), ciclos, avisoCalendario());
   histPreencherConsultoras(ciclos);
   histPreencherFechamento(ciclos);
   histPreencherLojasServicos(ciclos);
@@ -4588,6 +4683,7 @@ function renderHistoricoTab() {
   try { histRenderMix(ciclos); } catch (e) { console.error('hist mix:', e); }
   try { histRenderConsultora(ciclos); } catch (e) { console.error('hist consultora:', e); }
   try { histRenderComparar(ciclos); } catch (e) { console.error('hist comparar:', e); }
+  try { histRenderConsistencia(ciclos); } catch (e) { console.error('hist consistencia:', e); }
   try { histRenderDigital(ciclos); } catch (e) { console.error('hist digital:', e); }
   try { histRenderFechamento(ciclos); } catch (e) { console.error('hist fechamento:', e); }
 
@@ -4887,6 +4983,24 @@ function histRenderIaf(el, ciclos) {
 // Só olha ciclo FECHADO: o ciclo em curso tem acumulado parcial e acusaria "queda"
 // em todo mundo, todo dia. Regras deliberadamente conservadoras — alerta que dispara
 // à toa vira ruído e a gestora para de ler.
+// Um ciclo cujo último snapshot não pegou os dias finais fica com TODO MUNDO pior
+// que no ciclo anterior. Sem esta checagem, o painel acusava 11 consultoras de
+// "caiu de segmento" no mesmo dia — 11 histórias individuais para o que é um
+// problema só: faltou subir o fechamento. Queda generalizada é sintoma de dado
+// incompleto, não de desempenho.
+function cicloParecemIncompleto(anterior, atual) {
+  if (!anterior || !atual) return false;
+  const ORD = { Bronze: 1, Prata: 2, Ouro: 3, Diamante: 4 };
+  let comparados = 0, pioraram = 0;
+  for (const [can, cb] of Object.entries(atual.consultoras || {})) {
+    const ca = anterior.consultoras?.[can];
+    if (!ca?.iafTier || !cb.iafTier) continue;
+    comparados++;
+    if ((ORD[cb.iafTier] || 0) < (ORD[ca.iafTier] || 0)) pioraram++;
+  }
+  return comparados >= 6 && pioraram / comparados >= 0.6;
+}
+
 function histCalcAlertas(ciclos) {
   const fech = ciclos.filter(s => s.fechado);
   const out = [];
@@ -4953,6 +5067,17 @@ function histCalcAlertas(ciclos) {
   if (comIaf.length >= 2) {
     const ORD = { Bronze: 1, Prata: 2, Ouro: 3, Diamante: 4 };
     const b = comIaf[comIaf.length - 1], a = comIaf[comIaf.length - 2];
+
+    if (cicloParecemIncompleto(a, b)) {
+      const quando = (b.atualizadoEm || '').slice(0, 10).split('-').reverse().join('/');
+      const fim = String(b.fim || '').split('-').reverse().join('/');
+      // Devolve SÓ este: os alertas de loja acima também terminam no ciclo ${b.ciclo}
+      // e estão igualmente contaminados. Uma mensagem acionável vale mais que doze
+      // conclusões tiradas de dado furado.
+      return [{ nivel: 'grave', ico: '🧩',
+        txt: `<b>O ciclo ${b.ciclo} parece incompleto.</b> Quase toda a rede aparece pior que no ciclo ${a.ciclo} — queda generalizada assim costuma ser dado faltando, não desempenho. O snapshot é de ${quando || '?'} e o ciclo terminou em ${fim}. <b>Exporte o ciclo ${b.ciclo} com o filtro de período dele e suba pelo admin</b>; os alertas voltam a fazer sentido depois disso.` }];
+    }
+
     for (const [can, cb] of Object.entries(b.consultoras || {})) {
       const ca = a.consultoras?.[can];
       if (!ca?.iafTier || !cb.iafTier) continue;
@@ -4967,8 +5092,31 @@ function histCalcAlertas(ciclos) {
   return out.sort((x, y) => PESO[x.nivel] - PESO[y.nivel]).slice(0, 12);
 }
 
-function histRenderAlertas(el, ciclos) {
+// O calendário dos ciclos é um arquivo fixo por ano. Quando ele acaba, o snapshot
+// deixa de ser gravado sem que nada quebre na tela — e o histórico congela em
+// silêncio. Avisa ANTES, com folga para providenciar o calendário do ano seguinte.
+function avisoCalendario() {
+  if (!ciclosCalendario.length) return null;
+  const ordenados = [...ciclosCalendario].filter(c => c.fim).sort((a, b) => a.fim.localeCompare(b.fim));
+  const ultimo = ordenados[ordenados.length - 1];
+  if (!ultimo?.fim) return null;
+  const hoje = dataDeHojeISO();
+  const diasRestantes = Math.round((new Date(ultimo.fim + 'T00:00:00') - new Date(hoje + 'T00:00:00')) / 86400000);
+  const fimBR = ultimo.fim.split('-').reverse().join('/');
+  if (diasRestantes < 0) {
+    return { nivel: 'grave', ico: '📅',
+      txt: `O calendário de ciclos <b>terminou em ${fimBR}</b> (último: ciclo ${ultimo.ciclo}). A partir daqui nenhum snapshot novo é gravado e o histórico para de crescer — é preciso adicionar o calendário do ano seguinte em <code>config/ciclos-2026.json</code>.` };
+  }
+  if (diasRestantes <= 60) {
+    return { nivel: 'atencao', ico: '📅',
+      txt: `O calendário de ciclos vai até <b>${fimBR}</b> (ciclo ${ultimo.ciclo}), daqui a ${diasRestantes} dia(s). Depois disso o histórico para de ser gravado, em silêncio — vale já providenciar o calendário do ano seguinte.` };
+  }
+  return null;
+}
+
+function histRenderAlertas(el, ciclos, extra) {
   const alertas = histCalcAlertas(ciclos);
+  if (extra) alertas.unshift(extra);
   if (!alertas.length) {
     const fech = ciclos.filter(s => s.fechado).length;
     el.innerHTML = fech < 3
@@ -5471,7 +5619,9 @@ function histRenderDigital(ciclos) {
   const com = ciclos.filter(s => s.digital?.totals);
   if (!com.length) {
     chartEl.innerHTML = `<div class="hist-empty">Nenhum ciclo do histórico tem dados do canal digital.</div>`;
-    if (kpiEl) kpiEl.innerHTML = ''; if (tabEl) tabEl.innerHTML = '';
+    if (kpiEl) kpiEl.innerHTML = '';
+    if (tabEl) tabEl.innerHTML = '';
+    if ($('histDigPorLoja')) $('histDigPorLoja').innerHTML = '';   // senão fica conteúdo velho
     return;
   }
   const ind = $('histDigInd')?.value || 'receita';
@@ -5532,6 +5682,179 @@ function histRenderDigital(ciclos) {
     avisoEl.innerHTML = `· O canal digital <b>não soma</b> com a receita das lojas: as bases são diferentes (Receita Líquida x GMV). É o detalhe do indicador "Loja Digital Ativo" que cada loja já tem no Resumo.<br>
       · TME é tempo médio de espera — aqui em minutos, para caber no gráfico.`;
   }
+
+  histRenderDigitalPorLoja(com);
+}
+
+// Quebra por PDV: já vinha gravada em digital.perPdv e não tinha tela nenhuma.
+// Responde "o canal encaminha para onde?" e "onde ele converte melhor?".
+function histRenderDigitalPorLoja(com) {
+  const el = $('histDigPorLoja');
+  if (!el) return;
+  const pdvs = new Map();
+  for (const s of com) {
+    for (const l of (s.digital.perPdv || [])) {
+      const pdv = String(l.pdv || '').trim();
+      if (!/^\d{4,6}$/.test(pdv)) continue;
+      if (!pdvs.has(pdv)) pdvs.set(pdv, []);
+      pdvs.get(pdv).push({ ciclo: s.ciclo, ...l });
+    }
+  }
+  if (!pdvs.size) {
+    el.innerHTML = `<div class="hist-empty">Os ciclos do histórico não trazem a quebra por loja do canal digital.</div>`;
+    return;
+  }
+
+  const labels = com.map(s => ({ topo: `C${s.ciclo}` }));
+  const idx = new Map(com.map((s, i) => [s.ciclo, i]));
+  const series = [...pdvs.entries()]
+    .map(([pdv, linhas]) => ({
+      pdv,
+      nome: String(STORE_NAMES[pdv] || pdv).replace(/^Loja\s+/i, ''),
+      total: linhas.reduce((a, l) => a + nlz(l.receita), 0),
+      pontos: linhas.map(l => ({ i: idx.get(l.ciclo), v: nlz(l.receita) })).filter(p => p.i != null),
+    }))
+    .sort((a, b) => b.total - a.total);
+  series.forEach((s, i) => { s.foco = i === 0; });
+
+  let html = histChartXY(labels, series, { tipo: 'moeda', padR: 130, aria: 'Receita do canal digital por loja' });
+
+  // acumulado do período: quem recebe encaminhamento e quem transforma em venda
+  html += `<div class="hub-table-wrap"><table class="hub-table">
+    <thead><tr><th>Loja</th><th style="text-align:right">Encaminhados</th><th style="text-align:right">Convertidos</th>
+    <th style="text-align:right">Conversão</th><th style="text-align:right">Receita</th><th style="text-align:right">TME médio</th></tr></thead><tbody>`;
+  const foraDaRede = series.filter(s => !STORE_NAMES[s.pdv]).map(s => s.pdv);
+  for (const s of series) {
+    const linhas = pdvs.get(s.pdv);
+    const enc = linhas.reduce((a, l) => a + nlz(l.encaminhados), 0);
+    const conv = linhas.reduce((a, l) => a + nlz(l.convertidos), 0);
+    const rec = linhas.reduce((a, l) => a + nlz(l.receita), 0);
+    const tmes = linhas.map(l => histTmeMin(l.tme)).filter(v => v != null);
+    const tmeMed = tmes.length ? tmes.reduce((a, b) => a + b, 0) / tmes.length : null;
+    const taxa = enc > 0 ? (conv / enc) * 100 : null;
+    const marca = STORE_NAMES[s.pdv] ? '' : ` <span style="font-size:10px; color:var(--ink-dim)">(fora da rede)</span>`;
+    html += `<tr><td>${histEsc(s.nome)}${marca}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${histFmt(enc, 'int')}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${histFmt(conv, 'int')}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${taxa == null ? '—' : taxa.toFixed(1).replace('.', ',') + '%'}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace">${fmtBRL(rec)}</td>
+      <td style="text-align:right; font-family:'JetBrains Mono',monospace; color:var(--ink-mute)">${tmeMed == null ? '—' : tmeMed.toFixed(1).replace('.', ',') + ' min'}</td></tr>`;
+  }
+  html += `</tbody></table></div>
+    <div class="hist-aviso">· Acumulado de todos os ciclos com dado. Conversão aqui é convertidos ÷ encaminhados do próprio PDV — uma loja pode receber muito e converter pouco.`;
+  if (foraDaRede.length) {
+    html += `<br>· Os PDVs <b>${foraDaRede.join(', ')}</b> não são das 6 lojas do painel — o relatório do canal digital os traz mesmo assim. Aparecem aqui porque movimentaram receita, mas <b>não são responsabilidade sua</b>; confira se o filtro do relatório está certo antes de usar esse número.`;
+  }
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+// ---------- CONSISTÊNCIA ----------
+// Média esconde comportamento: 95% todo ciclo e uma oscilação entre 60% e 130%
+// dão a mesma média e pedem conversas opostas. Aqui a amplitude fica ao lado da
+// média, e a barra mostra onde a pessoa/loja transita.
+//
+// Só ciclo FECHADO: o ciclo em curso é parcial e puxaria toda a faixa para baixo.
+function histRenderConsistencia(ciclos) {
+  const chartEl = $('histConsisChart'), tabEl = $('histConsisTabela'), avisoEl = $('histConsisAviso');
+  if (!chartEl) return;
+  const tipo = $('histConsisTipo')?.value || 'lojas';
+  const base = $('histConsisBase')?.value || 'pctMeta';
+  const fech = ciclos.filter(s => s.fechado);
+
+  if (fech.length < 3) {
+    chartEl.innerHTML = `<div class="hist-empty">Consistência precisa de pelo menos 3 ciclos fechados (hoje: ${fech.length}).</div>`;
+    if (tabEl) tabEl.innerHTML = '';
+    return;
+  }
+
+  const universo = histCmpUniverso(fech, tipo);
+  const linhas = [];
+  for (const [k, nome] of universo) {
+    const vals = [];
+    for (const s of fech) {
+      const o = tipo === 'lojas' ? s.lojas?.[k] : s.consultoras?.[k];
+      if (!o) continue;
+      if (base === 'pctMeta') {
+        const meta = tipo === 'lojas' ? nlz(o.metas?.receita) : nlz(o.metas?.receita);
+        if (!meta || o.receita == null) continue;
+        vals.push({ ciclo: s.ciclo, v: (nlz(o.receita) / meta) * 100 });
+      } else {
+        if (o.receita == null || !s.dias) continue;
+        vals.push({ ciclo: s.ciclo, v: nlz(o.receita) / s.dias });
+      }
+    }
+    if (vals.length < 3) continue;
+    const nums = vals.map(x => x.v);
+    const media = nums.reduce((a, b) => a + b, 0) / nums.length;
+    const min = Math.min(...nums), max = Math.max(...nums);
+    // desvio relativo à própria média: compara oscilação entre gente de tamanhos
+    // diferentes (uma loja de 40k e outra de 200k)
+    const dp = Math.sqrt(nums.reduce((a, b) => a + (b - media) ** 2, 0) / nums.length);
+    const cv = media > 0 ? (dp / media) * 100 : 0;
+    linhas.push({ k, nome, media, min, max, cv, n: vals.length, vals });
+  }
+
+  if (!linhas.length) {
+    chartEl.innerHTML = `<div class="hist-empty">Sem dados suficientes${base === 'pctMeta' ? ' — os ciclos 1 a 7 não têm meta, então "% da meta" só considera do 8 em diante.' : '.'}</div>`;
+    if (tabEl) tabEl.innerHTML = '';
+    return;
+  }
+
+  // faixa visual: uma barra por linha, do mínimo ao máximo, com a média marcada
+  const escalaMin = Math.min(...linhas.map(l => l.min));
+  const escalaMax = Math.max(...linhas.map(l => l.max));
+  const span = (escalaMax - escalaMin) || 1;
+  const pos = (v) => ((v - escalaMin) / span) * 100;
+  const tipoFmt = base === 'pctMeta' ? 'pct' : 'moeda';
+
+  const ordenadas = [...linhas].sort((a, b) => a.cv - b.cv);
+  let html = `<div class="hist-viz">`;
+  for (const l of ordenadas) {
+    const classe = l.cv < 15 ? 'estavel' : l.cv < 30 ? 'medio' : 'oscilante';
+    html += `<div class="hist-faixa-row">
+      <div class="hist-faixa-nome">${histEsc(l.nome)}</div>
+      <div class="hist-faixa-trilho" title="${histEsc(l.nome)} — de ${histFmt(l.min, tipoFmt)} a ${histFmt(l.max, tipoFmt)} em ${l.n} ciclos fechados">
+        <div class="hist-faixa-barra ${classe}" style="left:${pos(l.min)}%; width:${Math.max(1.5, pos(l.max) - pos(l.min))}%"></div>
+        <div class="hist-faixa-media" style="left:${pos(l.media)}%"></div>
+      </div>
+      <div class="hist-faixa-cv ${classe}">${l.cv.toFixed(0)}%</div>
+    </div>`;
+  }
+  html += `<div class="hist-mix-legend">
+    <span><i style="background:var(--green)"></i>estável (variação &lt; 15%)</span>
+    <span><i style="background:var(--yellow)"></i>média (15-30%)</span>
+    <span><i style="background:var(--red)"></i>oscilante (&gt; 30%)</span>
+    <span style="color:var(--ink-dim)">a barra vai do pior ao melhor ciclo · o traço é a média</span>
+  </div></div>`;
+  chartEl.innerHTML = html;
+
+  if (tabEl) {
+    let t = `<thead><tr><th>${tipo === 'lojas' ? 'Loja' : 'Consultora'}</th><th style="text-align:right">Média</th>
+      <th style="text-align:right">Pior</th><th style="text-align:right">Melhor</th>
+      <th style="text-align:right">Variação</th><th style="text-align:right">Ciclos</th><th>Leitura</th></tr></thead><tbody>`;
+    for (const l of ordenadas) {
+      const classe = l.cv < 15 ? 'estavel' : l.cv < 30 ? 'medio' : 'oscilante';
+      const leitura = l.cv < 15 ? 'entrega previsível'
+        : l.cv < 30 ? 'oscila dentro do esperado'
+        : 'resultado imprevisível — a média engana';
+      t += `<tr><td>${histEsc(l.nome)}</td>
+        <td style="text-align:right; font-family:'JetBrains Mono',monospace">${histFmt(l.media, tipoFmt)}</td>
+        <td style="text-align:right; font-family:'JetBrains Mono',monospace; color:var(--ink-mute)">${histFmt(l.min, tipoFmt)}</td>
+        <td style="text-align:right; font-family:'JetBrains Mono',monospace; color:var(--ink-mute)">${histFmt(l.max, tipoFmt)}</td>
+        <td style="text-align:right; font-family:'JetBrains Mono',monospace" class="hist-faixa-cv ${classe}">${l.cv.toFixed(0)}%</td>
+        <td style="text-align:right">${l.n}</td>
+        <td style="font-size:11px; color:var(--ink-mute)">${leitura}</td></tr>`;
+    }
+    tabEl.innerHTML = t + `</tbody>`;
+  }
+
+  const avisos = [
+    `Variação = desvio padrão dividido pela própria média, então uma loja de R$ 40 mil e outra de R$ 200 mil ficam comparáveis.`,
+    `Só ciclos fechados (${fech.length}) — o ciclo em curso é acumulado parcial e derrubaria a faixa de todo mundo.`,
+  ];
+  if (base === 'pctMeta') avisos.push(`Os ciclos 1 a 7 não têm planilha de comissão, então "% da meta" começa no ciclo 8.`);
+  if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
 }
 
 // ---------- FICHA DA CONSULTORA ----------
@@ -5637,7 +5960,33 @@ function histRenderConsultora(ciclos) {
     tabEl.innerHTML = html + `</tbody>`;
   }
 
+  // Mix de serviços dela: sai da aba CONSULTOR do log v1, que traz nome + tipo por
+  // linha. Mostra quem puxa Cuidados Faciais e quem só faz maquiagem.
+  const mix = {};
+  let ciclosComMix = 0;
+  for (const l of linha) {
+    const m = l.snap.servicosPorConsultora?.[can];
+    if (!m) continue;
+    ciclosComMix++;
+    for (const [t, q] of Object.entries(m)) mix[t] = (mix[t] || 0) + nlz(q);
+  }
+  const totalMix = Object.values(mix).reduce((a, b) => a + b, 0);
+  if (totalMix && resumoEl) {
+    const ordem = Object.entries(mix).sort((a, b) => b[1] - a[1]);
+    const cor = (t, i) => HIST_MIX_CORES[i % HIST_MIX_CORES.length];
+    resumoEl.innerHTML += `<div class="hist-viz" style="margin-bottom:16px">
+      <div style="font-size:11px; color:var(--ink-mute); margin-bottom:6px">
+        Serviços realizados — ${totalMix} em ${ciclosComMix} ciclo(s) com detalhe por tipo</div>
+      <div class="hist-mix-bar">${ordem.map(([t, q], i) => {
+        const pct = (q / totalMix) * 100;
+        return `<div class="hist-mix-seg" style="width:${pct}%; background:${cor(t, i)}" title="${histEsc(t)}: ${q} (${pct.toFixed(0)}%)">${pct >= 12 ? pct.toFixed(0) + '%' : ''}</div>`;
+      }).join('')}</div>
+      <div class="hist-mix-legend">${ordem.map(([t, q], i) => `<span><i style="background:${cor(t, i)}"></i>${histEsc(t)} · ${q}</span>`).join('')}</div>
+    </div>`;
+  }
+
   const avisos = [`<b>${histEsc(nome)}</b>${ult.c.pdvs && ult.c.pdvs.length > 1 ? ` — atuou em mais de uma loja no C${ult.snap.ciclo}` : ''}.`];
+  if (!totalMix) avisos.push(`Sem detalhe de serviços por tipo: depende do relatório antigo, que trazia o nome do serviço por linha (cobre até 20/07/2026).`);
   const semMeta = presentes.filter(l => !l.c.metas).map(l => l.snap.ciclo);
   if (semMeta.length) avisos.push(`Sem meta cadastrada no(s) ciclo(s) ${semMeta.join(', ')} — ali não há % nem segmento.`);
   if (avisoEl) avisoEl.innerHTML = avisos.map(a => `· ${a}`).join('<br>');
@@ -6554,7 +6903,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   ['histIndicador', 'histModo', 'histRitmoInd', 'histRitmoModo',
    'histSvcAgrup', 'histSvcLoja', 'histConsultora', 'histFechCiclo',
-   'histCmpTipo', 'histCmpInd', 'histCmpNorm', 'histDigInd'].forEach(id => {
+   'histCmpTipo', 'histCmpInd', 'histCmpNorm', 'histDigInd',
+   'histConsisTipo', 'histConsisBase'].forEach(id => {
     const el = $(id);
     if (el) el.addEventListener('change', () => { try { renderHistoricoTab(); } catch (e) {} });
   });

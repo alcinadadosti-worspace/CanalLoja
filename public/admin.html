@@ -611,8 +611,11 @@ $('resetMetas').addEventListener('click', () => {
 
 // ---------- Slack por Loja ----------
 const LOJA_NAMES = { '24303':'Sao Sebastiao','24617':'Sustentavel','24668':'Palmeira','24669':'Penedo','24670':'Coruripe','24671':'Teotonio' };
+// SEMENTE dos IDs de Slack. A fonte de verdade passou a ser o CADASTRO (campo
+// slackId, editavel na tela de disparo) — este mapa so atende quem ainda nao foi
+// editado por la. NAO existe mais _default: quem nao tem ID fica de fora do envio
+// e aparece em vermelho na lista, em vez de a DM ir calada para o Eduardo.
 const SLACK_IDS = {
-  _default: 'U0895CZ8HU7', // Eduardo (teste / fallback)
   // Coruripe (24670)
   'ANA PAULA': 'U087E6YNPRD',
   'BRUNA': 'U08NLNHF29G',
@@ -649,10 +652,19 @@ const SLACK_IDS = {
 // Lookup do canal por nome NORMALIZADO (sem acento), pra nao cair no _default por
 // diferenca de acento/encoding (NFC/NFD) entre a chave do cadastro e a do SLACK_IDS.
 const SLACK_IDS_NORM = Object.fromEntries(
-  Object.entries(SLACK_IDS).filter(([k]) => k !== '_default').map(([k, v]) => [normNameAdmin(k), v])
+  Object.entries(SLACK_IDS).map(([k, v]) => [normNameAdmin(k), v])
 );
+// O ID do Slack vive no CADASTRO (Supabase), editavel na tela de disparo — nao no
+// codigo. O mapa acima ficou como semente das pessoas ja cadastradas: quem for
+// editada pela tela passa a valer pelo cadastro e nunca mais precisa de deploy.
+//
+// Devolve string VAZIA para quem nao tem ID. Antes caia no _default e a DM ia
+// silenciosamente para o Eduardo: a consultora nunca recebia e nada avisava.
+// Quem chama tem que tratar o vazio como "nao enviar".
 function slackChannelFor(name) {
-  return SLACK_IDS_NORM[normNameAdmin(name)] || SLACK_IDS._default;
+  const cad = allSellerMetas[name];
+  if (cad && cad.slackId !== undefined) return String(cad.slackId || '').trim();
+  return SLACK_IDS_NORM[normNameAdmin(name)] || '';
 }
 let allSellerMetas = {};
 let globalMetas = {};
@@ -685,8 +697,13 @@ function renderSlackSellerList() {
     return;
   }
   const pausadas = sellers.filter(([, d]) => d.paused).length;
+  // Sem ID de Slack a DM caia no _default (o Eduardo) SEM avisar ninguem: a
+  // consultora nunca recebia e nada denunciava. Agora aparece na cara.
+  const semId = sellers.filter(([n, d]) => !d.paused && !slackChannelFor(n)).map(([n]) => n);
   let html = '';
   if (pausadas) html += `<div style="font-size:12px; color:#c98a3a; margin-bottom:8px;">${pausadas} consultora(s) pausada(s) — não recebem alerta no Slack.</div>`;
+  if (semId.length) html += `<div style="font-size:12px; color:var(--red); margin-bottom:8px; line-height:1.5;">
+    ⚠ Sem ID do Slack: <b>${semId.join(', ')}</b>. Elas ficam de fora do envio — preencha o ID abaixo (o ID fica no cadastro, não no código).</div>`;
   html += '<div class="file-grid">';
   for (const [name, m] of sellers) {
     const paused = !!m.paused;
@@ -700,6 +717,10 @@ function renderSlackSellerList() {
       <div class="file-info" style="display:flex; align-items:center; gap:5px;">NPS
         <input type="text" data-nps-seller="${name}" value="${m.nps || ''}" placeholder="0"
           style="width:50px; text-align:right; padding:3px 6px;">%</div>
+      <div class="file-info" style="display:flex; align-items:center; gap:5px;">Slack
+        <input type="text" data-slack-seller="${name}" value="${slackChannelFor(name) || ''}" placeholder="sem ID"
+          title="ID do Slack desta consultora. Vazio = ela nao recebe DM."
+          style="width:110px; padding:3px 6px; font-family:'JetBrains Mono',monospace; font-size:10px;${slackChannelFor(name) ? '' : ' border-color:var(--red);'}"></div>
       <button type="button" data-toggle-pause="${name}" title="${paused ? 'Voltar a receber alertas' : 'Parar de enviar alertas (ex.: licença)'}"
         style="font-size:11px; padding:4px 10px; margin-left:8px; cursor:pointer; border-radius:6px; border:1px solid var(--line); background:${paused ? 'var(--accent)' : 'transparent'}; color:${paused ? '#fff' : 'var(--ink)'};">${paused ? 'Reativar' : 'Pausar'}</button>
     </div>`;
@@ -721,6 +742,29 @@ function renderSlackSellerList() {
         if (r.ok) toast(`NPS de ${sellerName}: ${val || '0'}%`);
         else toast('Erro ao salvar NPS.');
       } catch (err) { toast('Erro ao salvar NPS: ' + err.message); }
+    });
+  });
+
+  // ID do Slack por consultora, guardado no cadastro (Supabase) como o `paused`.
+  // Antes vivia num objeto no codigo: contratar ou desligar alguem exigia editar
+  // o arquivo e fazer deploy, e esquecer disso mandava a DM dela pro _default.
+  list.querySelectorAll('[data-slack-seller]').forEach(input => {
+    input.addEventListener('change', async (e) => {
+      const sellerName = e.target.dataset.slackSeller;
+      const val = e.target.value.trim();
+      if (val && !/^[UWC][A-Z0-9]{6,}$/i.test(val)) {
+        toast('ID do Slack parece invalido — deve comecar com U (pessoa) ou C (canal).');
+        return;
+      }
+      if (allSellerMetas[sellerName]) allSellerMetas[sellerName].slackId = val;
+      try {
+        const r = await fetch('/api/seller-metas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [sellerName]: { slackId: val } }),
+        });
+        if (r.ok) { toast(val ? `Slack de ${sellerName} salvo.` : `${sellerName} ficou SEM ID — nao recebe DM.`); renderSlackSellerList(); }
+        else toast('Erro ao salvar ID do Slack.');
+      } catch (err) { toast('Erro ao salvar ID: ' + err.message); }
     });
   });
 
@@ -1199,9 +1243,13 @@ $('slackSendAllBtn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = 'Enviando...';
   let sent = 0;
+  const semId = [];
 
   for (const [name, metas] of sellers) {
     const channel = slackChannelFor(name);
+    // Sem ID nao ha para onde mandar. Antes isto virava DM para o _default — a
+    // consultora nao recebia e ninguem ficava sabendo. Agora fica fora e e relatado.
+    if (!channel) { semId.push(name); continue; }
     const msg = buildAdminSlackMsg(name, metas, pdv);
     try {
       const r = await fetch('/api/slack/dm', {
@@ -1216,7 +1264,11 @@ $('slackSendAllBtn').addEventListener('click', async () => {
 
   btn.disabled = false;
   btn.textContent = 'Enviar Slack para todos da loja';
-  toast(`${sent}/${sellers.length} mensagens enviadas para ${LOJA_NAMES[pdv]}${pausadasCount ? ` · ${pausadasCount} pausada(s)` : ''}!`);
+  const extras = [
+    pausadasCount ? `${pausadasCount} pausada(s)` : '',
+    semId.length ? `${semId.length} SEM ID (${semId.join(', ')})` : '',
+  ].filter(Boolean);
+  toast(`${sent}/${sellers.length - semId.length} mensagens enviadas para ${LOJA_NAMES[pdv]}${extras.length ? ' · ' + extras.join(' · ') : ''}!`);
 });
 
 // ---------- Import Comissao ----------
