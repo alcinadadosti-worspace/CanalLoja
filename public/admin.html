@@ -294,6 +294,18 @@ section {
         </div>
       </div>
 
+      <div style="margin-top:18px; padding:12px 14px; border:1px solid var(--line); border-radius:8px;">
+        <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;">
+          <input type="checkbox" id="smMetaTravada" style="margin-top:3px;">
+          <span style="font-size:12px; line-height:1.5;">
+            <b>Travar a meta desta loja</b> — a receita e o skin acima param de ser recalculados
+            pelo import de comissao.<br>
+            <span style="color:var(--ink-mute)">Use quando a meta oficial da loja nao for a soma das metas
+            individuais. Sem travar, o proximo import sobrescreve o valor digitado aqui.</span>
+          </span>
+        </label>
+      </div>
+
       <div class="btn-row">
         <button id="saveStoreMetas">Salvar metas da loja</button>
       </div>
@@ -1413,7 +1425,12 @@ $('comConfirmBtn').addEventListener('click', async () => {
     // do historico usa, para o ciclo nao ter meta de loja diferente conforme o
     // caminho que gravou (ver derivarMetasDeLoja em comissao-parser.js).
     const metasLoja = ComissaoParser.derivarMetasDeLoja(sellerMetas);
+    const travadas = [];
     for (const [pdv, m] of Object.entries(metasLoja)) {
+      // Meta TRAVADA: a loja tem meta oficial digitada a mao que nao e a soma das
+      // individuais. Sem esta guarda, cada import de comissao apagava a correcao e
+      // ninguem percebia — o numero voltava para a soma silenciosamente.
+      if (allStoreMetas[pdv]?.metaTravada === 'sim') { travadas.push(pdv); continue; }
       // auditoriaLoja/npsLoja NAO entram aqui: sao REALIZADO que o admin ajusta na
       // mao (ver secao Metas por Loja), nao meta da comissao. Mandar '95' fixo a
       // cada import apagava o valor real — o servidor faz merge, entao omitir preserva.
@@ -1426,7 +1443,9 @@ $('comConfirmBtn').addEventListener('click', async () => {
         }),
       });
     }
-    toast('Metas por loja recalculadas!');
+    toast(travadas.length
+      ? `Metas por loja recalculadas · ${travadas.length} loja(s) com meta travada foram preservadas (${travadas.join(', ')}).`
+      : 'Metas por loja recalculadas!');
     $('comPreview').style.display = 'none';
     loadStoreMetas();
   } catch (e) { toast('Erro: ' + e.message); }
@@ -1465,6 +1484,8 @@ function applyStoreMetasToForm() {
     const el = $(domId);
     if (el) el.value = metas[SM_KEY_MAP[domId]] || '';
   }
+  const trava = $('smMetaTravada');
+  if (trava) trava.checked = metas.metaTravada === 'sim';
 }
 
 $('storeMetaSelect').addEventListener('change', applyStoreMetasToForm);
@@ -1476,6 +1497,8 @@ $('saveStoreMetas').addEventListener('click', async () => {
     const el = $(domId);
     if (el) body[SM_KEY_MAP[domId]] = el.value;
   }
+  // '' apaga a chave no servidor, entao destravar manda string vazia de proposito
+  body.metaTravada = $('smMetaTravada')?.checked ? 'sim' : '';
   try {
     const r = await fetch(`/api/store-metas/${pdv}`, {
       method: 'POST',
