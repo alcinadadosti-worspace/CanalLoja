@@ -1396,6 +1396,9 @@ $('comConfirmBtn').addEventListener('click', async () => {
     const iafUpdate = {};
     for (const [name, metas] of Object.entries(allSellerMetas)) {
       if (SKIP_NAMES.test(name) || !metas.pdv || !/^\d{4,6}$/.test(metas.pdv)) continue;
+      // Quem esta de licenca nao vendeu no ciclo: calcular daria ~0 e QUEIMARIA o
+      // segmento que ela tinha ao sair. Pausada mantem o nivel ate voltar.
+      if (metas.paused) continue;
       const actual = findConsultorActual(name, metas.pdv) || {};
       let pts = 0, max = 0;
       if (metas.receita) { pts += Math.min(1, (actual.receita||0) / metas.receita) * IAF_W.receita; max += IAF_W.receita; }
@@ -1405,7 +1408,12 @@ $('comConfirmBtn').addEventListener('click', async () => {
       const mi = parseFloat(globalMetas.metaID) || 0;
       if (metas.idCliente && mi) { pts += Math.min(1, (actual.idCliente||0) / mi) * IAF_W.idCliente; max += IAF_W.idCliente; }
       // Servicos fora do IAF (sem realizado); resgate/ID so para quem tem meta propria, denominador global
-      const pct = max > 0 ? pts / max : 0;
+      // max === 0 significa "nao tem NENHUMA meta neste ciclo" (ex.: consultora que
+      // nao entrou na planilha de comissao). Gravar o 0 aqui rebaixaria ela para
+      // Bronze inventando um resultado que nunca foi medido — melhor nao mexer.
+      if (max === 0) continue;
+      const pct = pts / max;
+      if (!Number.isFinite(pct)) continue;
       iafUpdate[name] = { iafSegment: pct };
     }
     if (Object.keys(iafUpdate).length) {
@@ -1422,10 +1430,13 @@ $('comConfirmBtn').addEventListener('click', async () => {
     const selId = 'comPdv_' + name.replace(/\s/g,'_');
     const sel = $(selId);
     const pdv = sel ? sel.value : '';
-    // Preserve iafSegment from previous cycle
-    const prevSegment = allSellerMetas[name]?.iafSegment;
+    // iafSegment NAO e reenviado aqui de proposito: o POST /api/seller-metas faz
+    // merge (`{...existente, ...novas}`), entao chave omitida e chave preservada.
+    // Reenviar o valor lido de allSellerMetas era pior que redundante — esse objeto
+    // e carregado uma vez em showAdminPanel() e nao volta a ser lido, entao ele
+    // desfazia o segmento que o bloco de fechamento de ciclo acabara de gravar
+    // logo acima, e o nivel de todo mundo ficava congelado no valor antigo.
     sellerMetas[name] = { ...metas, pdv };
-    if (prevSegment) sellerMetas[name].iafSegment = prevSegment;
   }
   try {
     const r = await fetch('/api/seller-metas', {
@@ -1449,13 +1460,18 @@ $('comConfirmBtn').addEventListener('click', async () => {
       // auditoriaLoja/npsLoja NAO entram aqui: sao REALIZADO que o admin ajusta na
       // mao (ver secao Metas por Loja), nao meta da comissao. Mandar '95' fixo a
       // cada import apagava o valor real — o servidor faz merge, entao omitir preserva.
+      // boletoMedio so vai quando a comissao REALMENTE trouxe o indicador. String
+      // vazia nao e "nao mexe": o servidor apaga a chave (ver server.js, rota
+      // store-metas). O ciclo 12 tirou a linha BOLETO MEDIO de quase todos os
+      // blocos, entao mandar '' aqui zerava a meta de 4 lojas de uma vez.
+      const corpoLoja = {
+        receitaLoja: String(Math.round(m.receitaLoja)),
+        skinLoja: String(Math.round(m.skinLoja)),
+      };
+      if (m.boletoMedio) corpoLoja.boletoMedio = String(m.boletoMedio);
       await fetch(`/api/store-metas/${pdv}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receitaLoja: String(Math.round(m.receitaLoja)),
-          skinLoja: String(Math.round(m.skinLoja)),
-          boletoMedio: m.boletoMedio ? String(m.boletoMedio) : '',
-        }),
+        body: JSON.stringify(corpoLoja),
       });
     }
     toast(travadas.length

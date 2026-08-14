@@ -33,6 +33,24 @@ const sellerMetasStore = {};
 const historicoStore = {};   // { "<ciclo>": snapshot } — ver /api/historico
 const serieDiariaStore = {}; // { "<ciclo>": { "<dia>": { "<pdv>": {...} } } } — ver /api/serie-diaria
 
+// A restauracao do boot e a UNICA coisa que enche os stores acima. Se ela falhar
+// por rede/timeout/5xx, eles ficam VAZIOS — e como todo POST persiste o store
+// INTEIRO (ex.: saveSellerMetas({...sellerMetasStore})), a primeira edicao no admin
+// gravaria esse vazio por cima do cadastro real e do historico no Supabase.
+// O lib/supabase.js ja propaga erro que nao seja 404 exatamente para isso ser
+// detectavel; aqui a gente se recusa a ESCREVER ate um boot completo dar certo.
+// Ler continua liberado: o painel abre, so nao persiste nada.
+let restauracaoOk = false;
+function bloqueadoPorRestauracao(res) {
+  if (restauracaoOk) return false;
+  res.status(503).json({
+    error: 'restauracao_incompleta',
+    message: 'O servidor subiu sem conseguir ler os dados do Supabase. '
+           + 'Gravar agora apagaria o que esta la. Reinicie o servico e tente de novo.',
+  });
+  return true;
+}
+
 // Calendario dos ciclos (datas oficiais do Boticario). O app so conhece a string
 // de periodo da aba FILTROS das planilhas; este mapa e quem diz "isso e o ciclo 10".
 const CICLOS = require('./config/ciclos-2026.json');
@@ -192,6 +210,7 @@ app.get('/api/metas', (req, res) => {
 });
 
 app.post('/api/metas', requireAdminOnly, async (req, res) => {
+  if (bloqueadoPorRestauracao(res)) return;
   const updates = req.body || {};
   for (const [key, val] of Object.entries(updates)) {
     if (!(key in metaStore)) continue;
@@ -219,6 +238,7 @@ app.get('/api/store-metas', requireAnyAuth, (req, res) => {
 });
 
 app.post('/api/store-metas/:pdv', requireAdminOnly, async (req, res) => {
+  if (bloqueadoPorRestauracao(res)) return;
   const pdv = req.params.pdv;
   if (!/^\d{4,6}$/.test(pdv)) return res.status(400).json({ error: 'invalid_pdv' });
   const updates = req.body || {};
@@ -243,6 +263,7 @@ app.get('/api/seller-metas', requireAnyAuth, (req, res) => {
 });
 
 app.post('/api/seller-metas', requireAdminOnly, async (req, res) => {
+  if (bloqueadoPorRestauracao(res)) return;
   const updates = req.body || {};
   for (const [name, metas] of Object.entries(updates)) {
     if (typeof metas !== 'object' || !metas) continue;
@@ -270,6 +291,7 @@ app.get('/api/historico', requireAnyAuth, (req, res) => {
 // Guarda contra aba velha esquecida aberta: um snapshot 'auto' nao sobrescreve ciclo
 // que fechou ha mais de 30 dias. Import retroativo e sempre explicito, entao passa.
 app.post('/api/historico', requireAnyAuth, async (req, res) => {
+  if (bloqueadoPorRestauracao(res)) return;
   const s = req.body || {};
   const ciclo = parseInt(s.ciclo, 10);
   if (!Number.isInteger(ciclo) || ciclo < 1 || ciclo > 40) {
@@ -344,6 +366,7 @@ const SERIE_MAX_DIAS = 45;        // ciclo mais longo tem 28 dias; folga pra err
 const SERIE_MAX_CICLOS = 40;
 
 app.post('/api/serie-diaria', requireAnyAuth, async (req, res) => {
+  if (bloqueadoPorRestauracao(res)) return;
   const b = req.body || {};
   const ciclo = parseInt(b.ciclo, 10);
   if (!Number.isInteger(ciclo) || ciclo < 1 || ciclo > 40) {
@@ -504,7 +527,9 @@ app.use(requirePage, express.static(PUBLIC_DIR, { index: false }));
 // ---------- Startup: restaura dados do Supabase ----------
 async function restoreFromSupabase() {
   if (!supa.isConfigured()) {
+    // Sem Supabase nao existe nada na nuvem para destruir: modo memoria e liberado.
     console.log('[supabase] nao configurado — usando apenas memoria');
+    restauracaoOk = true;
     return;
   }
   try {
@@ -544,8 +569,13 @@ async function restoreFromSupabase() {
       }
     }
     if (count) console.log(`[supabase] ${count} planilha(s) restaurada(s)`);
+
+    // So aqui: todo o estado veio da nuvem, entao gravar por cima e seguro.
+    restauracaoOk = true;
   } catch (e) {
-    console.warn('[supabase] falha ao restaurar:', e.message);
+    console.error('[supabase] FALHA AO RESTAURAR:', e.message);
+    console.error('[supabase] GRAVACOES BLOQUEADAS (HTTP 503) ate um boot completo. '
+                + 'O servidor esta no ar so para leitura — reinicie quando o Supabase voltar.');
   }
 }
 

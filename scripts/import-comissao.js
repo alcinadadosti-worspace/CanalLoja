@@ -131,8 +131,11 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
       ...(stoNovo[pdv] || {}),                        // preserva npsLoja/auditoriaLoja/metaTravada
       receitaLoja: String(Math.round(m.receitaLoja)),
       skinLoja: String(Math.round(m.skinLoja)),
-      boletoMedio: m.boletoMedio ? String(m.boletoMedio) : '',
     };
+    // So sobrescreve o boleto medio se a comissao trouxe o indicador. O ciclo 12
+    // removeu a linha BOLETO MEDIO de quase todos os blocos; gravar '' aqui
+    // apagava a meta de 4 lojas (o spread acima preserva o valor anterior).
+    if (m.boletoMedio) stoNovo[pdv].boletoMedio = String(m.boletoMedio);
   }
   await supa.saveStoreMetas(stoNovo);
 

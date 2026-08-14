@@ -117,7 +117,12 @@
     // estas consultoras respondem pela meta da LOJA inteira, não pela individual,
     // e a linha delas aqui SUBSTITUI a da aba "Consultor de loja".
     const leads = [];
-    const respSheet = wb.SheetNames.find(s => /RESPOS[ÁA]VEL|RESPONS[ÁA]VEL/i.test(s));
+    // O nome da aba vem com typo ("Resposável") e o acento pode chegar em NFD, onde
+    // o "á" sao dois code points e /[ÁA]/ nao casa. Se este find falhar a falha e
+    // SILENCIOSA: leads fica vazio e a meta de cada loja vira a SOMA das individuais
+    // em vez do valor oficial da lider — o erro dos R$ 702 mil descrito acima.
+    const semAcento = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const respSheet = wb.SheetNames.find(s => /RESPO?N?S[AÁ]VE(L|IS)/i.test(semAcento(s)));
     if (respSheet) {
       for (const [n, m] of Object.entries(parseComSheet(XLSX, wb, respSheet, 1, 2, 2))) {
         const lead = { storeLead: true, papel: 'lead' };

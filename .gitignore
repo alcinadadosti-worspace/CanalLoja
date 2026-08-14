@@ -3,6 +3,9 @@
 *.xls
 *.csv
 
+# Lock do LibreOffice/Excel com a planilha aberta (.~lock.<arquivo>#)
+.~lock.*#
+
 # OS
 .DS_Store
 Thumbs.db
