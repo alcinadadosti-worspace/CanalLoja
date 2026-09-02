@@ -9,7 +9,9 @@
 //     move a consultora de loja sem ninguem perceber. Aqui, sem PDV no cadastro, a
 //     pessoa fica SEM pdv e e reportada.
 //
-// Uso:
+// Uso (o xlsx nao esta no package.json — e dependencia so deste script, o servidor
+// nao usa; instale sem sujar o manifesto se o require falhar):
+//   npm install xlsx --no-save
 //   node scripts/import-comissao.js "COMISSAO CICLO 12.xlsx"            -> simula
 //   node scripts/import-comissao.js "COMISSAO CICLO 12.xlsx" --gravar   -> grava
 //
@@ -32,6 +34,20 @@ const GRAVAR = process.argv.includes('--gravar');
 if (!arquivo) { console.error('uso: node scripts/import-comissao.js <planilha.xlsx> [--gravar]'); process.exit(1); }
 
 const norm = (s) => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+
+// Metas que, se o bloco da pessoa NESTE ciclo nao trouxer, sao APAGADAS em vez de
+// preservadas. O merge do cadastro guarda a chave ausente, entao a meta do ciclo
+// anterior sobrevive e o painel compara a venda de hoje com um alvo velho, calado —
+// foi o que aconteceu no ciclo 13: as consultoras de servico perderam a linha
+// RECEITA (passaram a comissionar por servicos/conversao/P.M.C) e continuariam com a
+// receita do 12, que ainda entraria na soma da meta da loja.
+//
+// A lista e curta DE PROPOSITO. `boletoMedio` e `itensBoleto` ficam de fora porque a
+// planilha some com essas linhas o tempo todo sem que a meta deixe de valer (o ciclo
+// 12 tirou BOLETO MEDIO de quase todo bloco); apaga-las zerava a meta de 4 lojas.
+// `nps` tambem fica de fora: no cadastro da consultora ele e o realizado que o admin
+// digita a mao. `iafSegment`, `pdv`, `paused` e `slackId` sao cadastro, nao meta.
+const CAMPOS_META = ['receita', 'skin'];
 
 // Casa o nome curto da comissao ("CECÍLIA") com o nome canonico do snapshot
 // ("MARIA CICILIA BRITO VEIGA"): todos os tokens do curto tem que aparecer no
@@ -62,10 +78,18 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
   const storeMetas = await supa.getStoreMetas();
   const historico = await supa.getHistorico();
 
-  const { metas, globais, leads } = P.parseComissaoWorkbook(XLSX, XLSX.readFile(arquivo));
+  const { metas, globais, leads, abasVazias } = P.parseComissaoWorkbook(XLSX, XLSX.readFile(arquivo));
   console.log(`comissao: ${arquivo}`);
   console.log(`  ${Object.keys(metas).length} pessoas · responsaveis: ${leads.length ? leads.join(', ') : 'nenhuma'}`);
   console.log(`  globais: ${JSON.stringify(globais)}\n`);
+
+  // Aba existe e nao devolveu ninguem = layout mudou nela. Gravar assim monta um
+  // cadastro pela metade e derruba a meta das lojas de quem ficou de fora — para
+  // aqui, porque a diferenca nao aparece em nenhum outro lugar.
+  if (abasVazias && abasVazias.length) {
+    console.error(`ABORTADO: nenhuma pessoa saiu da(s) aba(s) ${abasVazias.join(', ')} — o layout mudou.`);
+    process.exit(1);
+  }
 
   // --- carry-over do IAF: usa o ultimo ciclo FECHADO do historico ---
   const fechados = Object.values(historico).filter(s => s.fechado).sort((a, b) => a.ciclo - b.ciclo);
@@ -94,15 +118,45 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
   }
   if (semPdv.length) console.log(`SEM PDV no cadastro (ficam sem loja ate voce ajustar): ${semPdv.join(', ')}\n`);
 
+  // Campo que a pessoa tinha no cadastro e que o bloco DELA neste ciclo nao traz:
+  // some. Ver CAMPOS_META — so vale para quem esta nesta comissao; quem ficou de
+  // fora dela nao e tocado.
+  const limpar = {};
+  for (const nome of Object.keys(sellerMetas)) {
+    const fora = CAMPOS_META.filter(c => cadastro[nome]?.[c] != null && sellerMetas[nome][c] == null);
+    if (fora.length) limpar[nome] = fora;
+  }
+  if (Object.keys(limpar).length) {
+    console.log('METAS APAGADAS (a comissao deste ciclo nao traz mais o indicador):');
+    for (const [n, campos] of Object.entries(limpar)) {
+      console.log(`  ${n.padEnd(16)}${campos.map(c => `${c}=${typeof cadastro[n][c] === 'number' ? Math.round(cadastro[n][c]).toLocaleString('pt-BR') : cadastro[n][c]}`).join(' · ')}`);
+    }
+    console.log('');
+  }
+
+  // Metas que a planilha ja traz e o app ainda nao mede (ver METAS_FUTURAS).
+  const futuras = Object.entries(sellerMetas)
+    .filter(([, m]) => P.METAS_FUTURAS.some(k => m[k] != null) && m.papel !== 'digital')
+    .map(([n, m]) => `${n}: ${P.METAS_FUTURAS.filter(k => m[k] != null).map(k => `${k}=${m[k]}`).join(' ')}`);
+  if (futuras.length) {
+    console.log(`METAS FUTURAS gravadas, mas SEM realizado em nenhum relatorio (nao pontuam):\n  ${futuras.join('\n  ')}\n`);
+  }
+
   // --- metas de loja derivadas, respeitando a trava ---
   const derivadas = P.derivarMetasDeLoja(sellerMetas);
   const NOMES = { '24303': 'Sao Sebastiao', '24617': 'Sustentavel', '24668': 'Palmeira',
                   '24669': 'Penedo', '24670': 'Coruripe', '24671': 'Teotonio' };
-  const novasLojas = {}, travadas = [];
+  const novasLojas = {}, travadas = [], zeradas = [];
   for (const [pdv, m] of Object.entries(derivadas)) {
     if (storeMetas[pdv]?.metaTravada === 'sim') { travadas.push(pdv); continue; }
+    // Derivada ZERO nao e meta zero, e "ninguem daquela loja trouxe o indicador":
+    // uma loja so com consultora de servico (que desde o ciclo 13 nao tem receita),
+    // ou uma aba que mudou de layout e escondeu as consultoras. Gravar "0" apagaria a
+    // meta da loja em silencio — preserva e reporta. Mesma regra do boleto medio.
+    if (!m.receitaLoja || !m.skinLoja) zeradas.push(`${NOMES[pdv] || pdv} (${!m.receitaLoja ? 'receita' : 'skin'})`);
     novasLojas[pdv] = m;
   }
+  if (zeradas.length) console.log(`\nDERIVADA ZERO — o valor anterior fica de pe: ${zeradas.join(', ')}`);
 
   console.log('META DE LOJA        atual      nova   variacao');
   for (const pdv of Object.keys(NOMES)) {
@@ -120,21 +174,27 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
 
   if (!GRAVAR) { console.log('\n[simulacao] nada foi gravado — rode com --gravar para aplicar'); return; }
 
-  // --- grava (merge igual ao servidor: chave ausente e chave preservada) ---
+  // --- grava ---
+  // Merge como o servidor faz (chave ausente = chave preservada) e, DEPOIS, apaga os
+  // campos de CAMPOS_META que a comissao deste ciclo nao trouxe. A gravacao e direta
+  // no Supabase de proposito: o POST /api/seller-metas so faz merge e nao consegue
+  // apagar campo.
   const cadNovo = { ...cadastro };
-  for (const [n, m] of Object.entries(sellerMetas)) cadNovo[n] = { ...(cadNovo[n] || {}), ...m };
+  for (const [n, m] of Object.entries(sellerMetas)) {
+    cadNovo[n] = { ...(cadNovo[n] || {}), ...m };
+    for (const c of (limpar[n] || [])) delete cadNovo[n][c];
+  }
   await supa.saveSellerMetas(cadNovo);
 
   const stoNovo = { ...storeMetas };
   for (const [pdv, m] of Object.entries(novasLojas)) {
-    stoNovo[pdv] = {
-      ...(stoNovo[pdv] || {}),                        // preserva npsLoja/auditoriaLoja/metaTravada
-      receitaLoja: String(Math.round(m.receitaLoja)),
-      skinLoja: String(Math.round(m.skinLoja)),
-    };
-    // So sobrescreve o boleto medio se a comissao trouxe o indicador. O ciclo 12
-    // removeu a linha BOLETO MEDIO de quase todos os blocos; gravar '' aqui
-    // apagava a meta de 4 lojas (o spread acima preserva o valor anterior).
+    // O spread preserva npsLoja/auditoriaLoja/metaTravada. Cada indicador so e
+    // sobrescrito quando a comissao REALMENTE o trouxe (valor > 0) — ver "DERIVADA
+    // ZERO" acima e o caso do boleto medio no ciclo 12, que removeu a linha BOLETO
+    // MEDIO de quase todos os blocos e teria zerado a meta de 4 lojas.
+    stoNovo[pdv] = { ...(stoNovo[pdv] || {}) };
+    if (m.receitaLoja) stoNovo[pdv].receitaLoja = String(Math.round(m.receitaLoja));
+    if (m.skinLoja) stoNovo[pdv].skinLoja = String(Math.round(m.skinLoja));
     if (m.boletoMedio) stoNovo[pdv].boletoMedio = String(m.boletoMedio);
   }
   await supa.saveStoreMetas(stoNovo);

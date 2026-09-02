@@ -375,6 +375,10 @@ section {
               <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">BM</th>
               <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">SKIN</th>
               <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">SVC</th>
+              <!-- Metas que a planilha ja traz e o app ainda NAO mede (ver METAS_FUTURAS
+                   em comissao-parser.js). Ficam a vista para ninguem achar que o
+                   painel esta acompanhando os dois indicadores. -->
+              <th style="padding:8px 10px; text-align:right; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:10px;">CONV. / P.M.C<br><span style="opacity:0.6">(sem medicao)</span></th>
             </tr></thead>
             <tbody id="comTableBody"></tbody>
           </table>
@@ -1196,11 +1200,19 @@ function buildAdminSlackMsg(name, metas, pdv) {
   const lockedPct = parseFloat(allSellerMetas[name]?.iafSegment) || 0;
   const iafPct = cycleHasEnded() ? calcPct : lockedPct;
   const iafTier = IAF_TIERS.find(t => iafPct >= t.min) || IAF_TIERS[IAF_TIERS.length - 1];
+  // iafMax === 0 = NENHUM indicador do IAF se aplica a ela neste ciclo — o caso das
+  // consultoras de servico do ciclo 13 em diante, que nao tem receita, skin, resgate
+  // nem ID Cliente (so servicos/conversao/P.M.C). Durante o ciclo o que vale e o
+  // nivel travado do ciclo anterior; sem ele, nao ha segmento nenhum a mostrar.
+  // Mandar ":third_place_medal: Segmento: *Bronze* (0% IAF)" na DM e dizer que ela
+  // foi mal num numero que ninguem apurou. O fechamento de ciclo logo abaixo ja
+  // ignora max === 0 pelo mesmo motivo.
+  const semIaf = cycleHasEnded() ? iafMax === 0 : !lockedPct;
 
   let msg = `:memo: RESULTADO ATE O DIA – [${fmtDate}]\n`;
   msg += `Loja: ${store} – ${pdv}\n`;
   msg += `Consultora: *${name}*\n`;
-  msg += `${iafTier.slack} Segmento: *${iafTier.label}* (${Math.round(iafPct*100)}% IAF)\n\n`;
+  msg += semIaf ? `\n` : `${iafTier.slack} Segmento: *${iafTier.label}* (${Math.round(iafPct*100)}% IAF)\n\n`;
 
   if (metaReceita) {
     msg += `:bar_chart: FALTANDO PARA A META – RECEITA\n`;
@@ -1320,7 +1332,7 @@ async function handleComFile(file) {
   // e ANNY→JULIENE) vive em /comissao-parser.js, compartilhado com o import
   // retroativo da aba Histórico no index.html — a lógica não pode divergir entre
   // as duas telas.
-  const { metas: all, abasAusentes: missingSheets } = ComissaoParser.parseComissaoWorkbook(XLSX, wb);
+  const { metas: all, abasAusentes: missingSheets, abasVazias } = ComissaoParser.parseComissaoWorkbook(XLSX, wb);
 
   const count = Object.keys(all).length;
   if (count === 0) {
@@ -1328,10 +1340,30 @@ async function handleComFile(file) {
     return;
   }
   if (missingSheets.length) toast(`Aviso: abas ausentes na comissao: ${missingSheets.join(', ')}`);
+  // Aba presente da qual nao saiu ninguem = layout mudou nela. E o pior caso: o
+  // import segue, mas com uma parte da rede faltando, e a meta das lojas dessa
+  // gente cai sem ninguem notar. Aconteceu no ciclo 13, quando "Consultor de loja"
+  // andou uma coluna para a esquerda.
+  if (abasVazias.length) {
+    toast(`ATENCAO: nenhuma consultora saiu da(s) aba(s) ${abasVazias.join(', ')} — o layout mudou. NAO confirme antes de conferir.`);
+  }
 
   comParsedData = all;
   renderComPreview();
   toast(`Comissao lida: ${count} consultora(s) encontrada(s).`);
+}
+
+// CONVERSAO e P.M.C entraram na aba "Consultora de servicos" no ciclo 13. Sao lidas
+// e gravadas no cadastro, mas nenhum dos relatorios importados traz o realizado
+// delas — nada e pontuado por elas ate isso mudar. A coluna existe so para mostrar
+// que a meta chegou; ver METAS_FUTURAS em comissao-parser.js.
+function futuras(m) {
+  // A conversao da loja digital fica de fora: essa o painel JA mede, pela meta
+  // global "Conversao Digital (%)" — marca-la de "sem medicao" seria mentira.
+  const conv = (m.papel !== 'digital' && m.conversao != null) ? `${(m.conversao * 100).toFixed(0)}%` : null;
+  const pmc = m.pmc != null ? Math.round(m.pmc) : null;
+  if (conv == null && pmc == null) return '-';
+  return `${conv || '-'} / ${pmc || '-'}`;
 }
 
 function renderComPreview() {
@@ -1352,6 +1384,7 @@ function renderComPreview() {
       <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.boletoMedio ? Math.round(m.boletoMedio) : '-'}</td>
       <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.skin ? Math.round(m.skin).toLocaleString('pt-BR') : '-'}</td>
       <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace;">${m.servicos ? Math.round(m.servicos) : '-'}</td>
+      <td style="padding:6px 10px; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--ink-mute);">${futuras(m)}</td>
     `;
     body.appendChild(tr);
   }
@@ -1464,11 +1497,15 @@ $('comConfirmBtn').addEventListener('click', async () => {
       // vazia nao e "nao mexe": o servidor apaga a chave (ver server.js, rota
       // store-metas). O ciclo 12 tirou a linha BOLETO MEDIO de quase todos os
       // blocos, entao mandar '' aqui zerava a meta de 4 lojas de uma vez.
-      const corpoLoja = {
-        receitaLoja: String(Math.round(m.receitaLoja)),
-        skinLoja: String(Math.round(m.skinLoja)),
-      };
+      // Derivada ZERO nao e meta zero, e "ninguem daquela loja trouxe o indicador"
+      // (loja so com consultora de servico, que desde o ciclo 13 nao tem receita, ou
+      // aba que mudou de layout e escondeu as consultoras). Zero aqui apagaria a meta
+      // da loja em silencio — cada indicador so vai quando a comissao o trouxe.
+      const corpoLoja = {};
+      if (m.receitaLoja) corpoLoja.receitaLoja = String(Math.round(m.receitaLoja));
+      if (m.skinLoja) corpoLoja.skinLoja = String(Math.round(m.skinLoja));
       if (m.boletoMedio) corpoLoja.boletoMedio = String(m.boletoMedio);
+      if (!Object.keys(corpoLoja).length) continue;
       await fetch(`/api/store-metas/${pdv}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(corpoLoja),

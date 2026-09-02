@@ -3987,6 +3987,13 @@ function renderDashboard() {
     s.iafPct = cycleEnded ? calcPct : lockedPct;
     s.iafPts = pts;
     s.iafMax = max;
+    // max === 0 = NENHUM indicador do IAF se aplica a ela neste ciclo (o caso das
+    // consultoras de serviço a partir do ciclo 13: sem receita, skin, resgate nem ID
+    // Cliente, só serviços/conversão/P.M.C). Isso é "não medido", não "zero" —
+    // mostrar Bronze 0% inventa um resultado que ninguém apurou. Mesma regra que
+    // buildCicloSnapshot (iafPct null) e o fechamento de ciclo do admin (não grava)
+    // já seguem; só o card ficava de fora.
+    s.iafSemIndicador = cycleEnded ? max === 0 : !lockedPct;
     s.iafTier = iafTierFor(s.iafPct);
   }
 
@@ -4009,8 +4016,12 @@ function renderDashboard() {
         <div>${dot}</div>
       </div>`;
     };
-    const progressTxt = s.iafCalcPct !== s.iafPct ? ` · atual ${Math.round(s.iafCalcPct*100)}%` : '';
-    const tierBadge = `<span style="font-size:10px; padding:2px 8px; border-radius:10px; background:rgba(231,196,108,0.12); color:var(--accent); font-family:'JetBrains Mono',monospace; letter-spacing:0.05em; margin-left:6px;">${s.iafTier.emoji} ${s.iafTier.label}${progressTxt}</span>`;
+    // Sem indicador do IAF: badge neutro em vez de "🥉 Bronze · atual 0%". O "atual"
+    // também some quando max === 0 — 0% ali é ausência de medição, não desempenho.
+    const progressTxt = (s.iafMax > 0 && s.iafCalcPct !== s.iafPct) ? ` · atual ${Math.round(s.iafCalcPct*100)}%` : '';
+    const tierBadge = s.iafSemIndicador
+      ? `<span title="Nenhum indicador do IAF (receita, skin, resgate, ID Cliente) se aplica a ela neste ciclo — não há segmento a apurar." style="font-size:10px; padding:2px 8px; border-radius:10px; background:rgba(255,255,255,0.06); color:var(--ink-mute); font-family:'JetBrains Mono',monospace; letter-spacing:0.05em; margin-left:6px;">— sem IAF neste ciclo</span>`
+      : `<span style="font-size:10px; padding:2px 8px; border-radius:10px; background:rgba(231,196,108,0.12); color:var(--accent); font-family:'JetBrains Mono',monospace; letter-spacing:0.05em; margin-left:6px;">${s.iafTier.emoji} ${s.iafTier.label}${progressTxt}</span>`;
     return `<div class="dash-seller">
       <div class="dash-seller-name" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
         <span>${aliasOf(s.can)} <span class="dash-seller-medal">${medal}</span> ${tierBadge}</span>
@@ -4055,7 +4066,7 @@ function renderDashboard() {
     const metaBM = nlz(metaPerSeller[s.can]?.boletoMedio) || metaBoletoLoja;
     return {
       name: aliasOf(s.can), can: s.can,
-      iafTier: s.iafTier, iafPct: s.iafPct,
+      iafTier: s.iafTier, iafPct: s.iafPct, iafSemIndicador: s.iafSemIndicador,
       ps: s.ps, metaR, metaS, metaSvc, metaBM,
       pctR: s.pctR, pctS: s.pctS,
       metaPRM, metaTurb, metaID, metaResgate, metaBBX, metaItens,
@@ -4470,6 +4481,9 @@ async function importarCicloRetroativo(fileList, opts) {
     if (comWb) {
       const { metas, globais } = ComissaoParser.parseComissaoWorkbook(XLSX, comWb, {
         digitalEhJuliene: cicloDetectado.ciclo >= 11,
+        // Até o ciclo 11 o bloco "BRUNA" era da Rayane (Coruripe), que era Consultora
+        // Responsável; do 12 em diante é da Soares (Palmeira). Ver o rename no parser.
+        brunaEhSoares: cicloDetectado.ciclo >= 12,
       });
       const receitas = receitaPorLojaDoResumo();
       const lojaDaLead = lojasDasResponsaveis(metas, storesCatalog, receitas);
@@ -6954,7 +6968,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let msg = `:memo: RESULTADO ATÉ O DIA – [${s.fmtDate}]\n`;
     msg += `Loja: ${store}\n`;
     msg += `Consultora: *${s.name}*\n`;
-    if (s.iafTier) {
+    // Sem indicador do IAF neste ciclo (consultora de serviço a partir do 13): a
+    // linha do segmento sai fora. Mandar "Bronze (0%)" para quem nao tem nenhum
+    // indicador apurado e dizer que ela foi mal num numero que ninguem mediu.
+    if (s.iafTier && !s.iafSemIndicador) {
       msg += `${TIER_SLACK[s.iafTier.label] || ''} Segmento: *${s.iafTier.label}*`;
       if (s.iafCalcPct !== undefined) msg += ` · progresso ciclo: ${Math.round(s.iafCalcPct*100)}%`;
       msg += `\n`;
