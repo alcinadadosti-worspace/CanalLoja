@@ -92,7 +92,15 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
   }
 
   // --- carry-over do IAF: usa o ultimo ciclo FECHADO do historico ---
-  const fechados = Object.values(historico).filter(s => s.fechado).sort((a, b) => a.ciclo - b.ciclo);
+  // `fechado` no JSON e o valor congelado no dia em que o snapshot foi gravado —
+  // quem grava o ciclo 13 nao volta para marcar o 12 como fechado. O painel
+  // recalcula na leitura (loadHistorico, public/index.html) e aqui tem que ser a
+  // mesma regra: sem isso o carry-over salta para um ciclo velho em silencio (o
+  // ciclo 14 pegou o segmento do 11 porque o 12 ficou com fechado:false gravado).
+  const hojeISO = (() => { const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const jaFechou = (s) => (s.fim ? hojeISO > s.fim : !!s.fechado);
+  const fechados = Object.values(historico).filter(jaFechou).sort((a, b) => a.ciclo - b.ciclo);
   const ultimo = fechados[fechados.length - 1];
   const canonicos = ultimo ? Object.keys(ultimo.consultoras || {}) : [];
   console.log(`carry-over do segmento IAF: ciclo ${ultimo ? ultimo.ciclo : '?'} (fechado, ${canonicos.length} consultoras)`);
@@ -172,6 +180,23 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
   const virouFalse = Object.entries(cadastro).filter(([n, d]) => d.storeLead && sellerMetas[n] && !sellerMetas[n].storeLead).map(([n]) => n);
   console.log(`deixam de ser responsaveis pela loja: ${virouFalse.join(', ') || 'ninguem'}`);
 
+  // A meta do canal digital NAO sai do cadastro da consultora: o painel e a DM leem
+  // as globais metaDigital* (ver index.html, montagem do bloco CANAL DIGITAL). Sem
+  // atualizar aqui, elas ficavam congeladas no ciclo em que alguem digitou a mao —
+  // o 14 chegou com receita 18.000 e BM 190 enquanto o app comparava com 17.000/200.
+  // Escala: a global de conversao e em % inteiro e o parser devolve fracao.
+  const gAtual = await supa.getMetas({});
+  const digital = Object.values(sellerMetas).find(m => m.papel === 'digital');
+  const gDigital = {};
+  if (digital) {
+    if (digital.receita != null) gDigital.metaDigitalReceita = String(Math.round(digital.receita));
+    if (digital.conversao != null) gDigital.metaDigitalConversao = String(Number((digital.conversao * 100).toFixed(2)));
+    if (digital.boletoMedio != null) gDigital.metaDigitalBM = String(Math.round(digital.boletoMedio));
+  }
+  const mudaram = Object.entries(gDigital).filter(([k, v]) => String(gAtual[k] ?? '') !== v);
+  console.log(`\nMETA DO CANAL DIGITAL: ${!digital ? 'nenhuma consultora digital nesta comissao' :
+    (mudaram.length ? mudaram.map(([k, v]) => `${k} ${gAtual[k] ?? '-'} -> ${v}`).join(' · ') : 'sem mudanca')}`);
+
   if (!GRAVAR) { console.log('\n[simulacao] nada foi gravado — rode com --gravar para aplicar'); return; }
 
   // --- grava ---
@@ -202,8 +227,7 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
   const MAP_GLOBAL = { prm: 'metaPRM', turbinado: 'metaTurbinado', idCliente: 'metaID',
                        resgate: 'metaResgate', nps: 'metaNPS', auditoria: 'metaAuditoria',
                        itensBoleto: 'metaItensBoleto' };
-  const gAtual = await supa.getMetas({});
-  const gNovo = { ...gAtual };
+  const gNovo = { ...gAtual, ...gDigital };
   for (const [k, id] of Object.entries(MAP_GLOBAL)) if (globais[k] != null) gNovo[id] = String(globais[k]);
   await supa.saveMetas(gNovo);
 
