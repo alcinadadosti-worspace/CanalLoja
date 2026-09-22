@@ -42,12 +42,24 @@ const norm = (s) => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-
 // RECEITA (passaram a comissionar por servicos/conversao/P.M.C) e continuariam com a
 // receita do 12, que ainda entraria na soma da meta da loja.
 //
-// A lista e curta DE PROPOSITO. `boletoMedio` e `itensBoleto` ficam de fora porque a
+// `resgate` e `idCliente` entraram na lista no ciclo 14. No cadastro eles funcionam
+// como CHAVE do IAF — iafCalcFor so pontua o indicador se a consultora tem o campo
+// (o alvo em si e global) — entao um resgate esquecido do ciclo passado nao vira meta
+// errada: vira IAF inventado. Foi o caso da ELIENE, que virou consultora de servico
+// no 14 e ficou com os dois do 13; ela apareceria com segmento enquanto a JOANA, mesmo
+// papel e mesmo bloco na planilha, aparecia "sem IAF neste ciclo". Note que a BRUNA
+// SOARES e de servico e TEM os dois na comissao do 14 — isso e da planilha, nao
+// residuo, e por isso a regra tem que ser "o que o bloco DELA trouxe", nunca por papel.
+// `conversao` e `pmc` entraram pelo mesmo motivo, de cima para baixo: a SHAYANE voltou
+// a ser de loja e carregava as duas do tempo de servico. Hoje nao pontuam
+// (METAS_FUTURAS), mas viram meta fantasma no dia em que passarem a medir.
+//
+// A lista segue curta DE PROPOSITO. `boletoMedio` e `itensBoleto` ficam de fora porque a
 // planilha some com essas linhas o tempo todo sem que a meta deixe de valer (o ciclo
 // 12 tirou BOLETO MEDIO de quase todo bloco); apaga-las zerava a meta de 4 lojas.
 // `nps` tambem fica de fora: no cadastro da consultora ele e o realizado que o admin
 // digita a mao. `iafSegment`, `pdv`, `paused` e `slackId` sao cadastro, nao meta.
-const CAMPOS_META = ['receita', 'skin'];
+const CAMPOS_META = ['receita', 'skin', 'resgate', 'idCliente', 'conversao', 'pmc'];
 
 // Casa o nome curto da comissao ("CECÍLIA") com o nome canonico do snapshot
 // ("MARIA CICILIA BRITO VEIGA"): todos os tokens do curto tem que aparecer no
@@ -134,10 +146,30 @@ function casaCanonico(nomeCurto, canonicos, consultoras, pdvEsperado) {
     const fora = CAMPOS_META.filter(c => cadastro[nome]?.[c] != null && sellerMetas[nome][c] == null);
     if (fora.length) limpar[nome] = fora;
   }
+  // Mudanca de MODELO atinge uma pessoa ou um punhado (a Eliene virou consultora de
+  // servico). Campo que some da rede INTEIRA de uma vez e outra coisa: o layout da aba
+  // mudou e o parser deixou de achar a linha — mesmo estrago silencioso de
+  // `abasVazias`, so que por indicador. Para aqui em vez de apagar a meta de todo mundo.
+  const pessoas = Object.keys(sellerMetas).length;
+  const emMassa = CAMPOS_META
+    .map(c => [c, Object.values(limpar).filter(cs => cs.includes(c)).length])
+    .filter(([, n]) => n > pessoas / 2);
+  if (emMassa.length && !process.argv.includes('--forcar-limpeza')) {
+    console.error(`\nABORTADO: ${emMassa.map(([c, n]) => `"${c}" sumiu de ${n} das ${pessoas} pessoas`).join(', ')}.`);
+    console.error('Isso e cara de layout mudado na aba, nao de modelo novo. Confira a planilha;');
+    console.error('se a mudanca for real mesmo, repita com --forcar-limpeza.');
+    process.exit(1);
+  }
+
   if (Object.keys(limpar).length) {
     console.log('METAS APAGADAS (a comissao deste ciclo nao traz mais o indicador):');
     for (const [n, campos] of Object.entries(limpar)) {
-      console.log(`  ${n.padEnd(16)}${campos.map(c => `${c}=${typeof cadastro[n][c] === 'number' ? Math.round(cadastro[n][c]).toLocaleString('pt-BR') : cadastro[n][c]}`).join(' · ')}`);
+      // Arredondar tudo para inteiro mentia justamente nos campos que entraram no
+      // ciclo 14: resgate 0,52 e ID Cliente 1,15 saiam os dois como "1".
+      const fmt = (v) => typeof v === 'number'
+        ? v.toLocaleString('pt-BR', { maximumFractionDigits: Math.abs(v) < 100 ? 2 : 0 })
+        : String(v);
+      console.log(`  ${n.padEnd(16)}${campos.map(c => `${c}=${fmt(cadastro[n][c])}`).join(' · ')}`);
     }
     console.log('');
   }
