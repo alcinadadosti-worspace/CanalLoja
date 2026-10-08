@@ -227,7 +227,7 @@
   // trabalhou naquele ciclo (era o caso da Valesca no ciclo 8, R$ 60.035 sumidos
   // da meta do Palmeira). No caminho historico use NAO_E_PESSOA — o catalogo
   // daquele ciclo ja sabe quem estava na rede.
-  const SKIP_NAMES = /^(GERENTE|LEIDIANE|VALESCA|ALEXIA|TOTAL|RECEITA)/i;
+  const SKIP_NAMES = /^(GERENTE|LEIDIANE|VALESCA|ALEXIA|JOANN?A|TOTAL|RECEITA)/i;
 
   const ehGerente = (nome, m) => SKIP_NAMES.test(nome) || (m && m.papel === 'gerente');
 
